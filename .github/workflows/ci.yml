@@ -49,6 +49,12 @@ jobs:
           $py = "$env:LOCALAPPDATA\srnet-client\venv\Scripts\python.exe"
           & $py packaging/windows/ci_check.py
           if ($LASTEXITCODE) { exit 1 }
+      - name: Windows smoke checklist (local test host, loopback only)
+        shell: pwsh
+        run: |
+          $py = "$env:LOCALAPPDATA\srnet-client\venv\Scripts\python.exe"
+          & $py packaging/windows/smoke_local.py
+          if ($LASTEXITCODE) { exit 1 }
       - name: Uninstall
         shell: pwsh
         run: |
@@ -68,3 +74,4 @@ jobs:
           PY=~/.local/share/srnet-client/venv/bin/python
           (cd client-cli && $PY -m unittest discover -s tests) </dev/null
           (cd snapps/tests && $PY -m unittest)
+          $PY packaging/windows/smoke_local.py

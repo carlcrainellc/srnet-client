@@ -14,10 +14,48 @@ import threading
 import mbfmt as F
 
 
+class _Result:
+    """Rows fetched in full while the connection lock was held."""
+    __slots__ = ("rows", "rowcount")
+
+    def __init__(self, rows, rowcount):
+        self.rows, self.rowcount = rows, rowcount
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return list(self.rows)
+
+
+class _LockedConn:
+    """One sqlite connection shared by the HTTP threads and the background sync.
+
+    sqlite3 connections are not safe for concurrent use from several threads, even with
+    check_same_thread=False: interleaved cursors returned rows with env=None during a sync.
+    Every statement runs and is fully fetched under one lock."""
+
+    def __init__(self, conn, lock):
+        self._c, self._lock = conn, lock
+
+    def execute(self, sql, args=()):
+        with self._lock:
+            cur = self._c.execute(sql, args)
+            return _Result(cur.fetchall(), cur.rowcount)
+
+    def close(self):
+        with self._lock:
+            self._c.close()
+
+
 class Store:
     def __init__(self, path: str):
-        self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.lock = threading.RLock()
+        self.db = _LockedConn(sqlite3.connect(path, check_same_thread=False, isolation_level=None),
+                              self.lock)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("""CREATE TABLE IF NOT EXISTS log(
             seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, author TEXT NOT NULL,
