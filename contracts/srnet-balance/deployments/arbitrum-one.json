@@ -1,0 +1,32 @@
+{
+  "chainId": 42161,
+  "current": {
+    "address": "0x7E0d01B7dd916BdAB96B0971ab92D160E1664431",
+    "tx": "0xa89abc5c2af92529f5bdb1f4c5e9e342e8c6799e00dca2d73a06ba868568db81",
+    "block": 514816032,
+    "gasUsed": 4899383,
+    "deployer": "0x4601787d2a580a09ea46a93afe490d3d3ad1617b",
+    "sourceCommit": "c971317",
+    "features": ["fundWithPermit"],
+    "sourcify": "exact_match",
+    "date": "2026-10-14"
+  },
+  "params": {
+    "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    "feeRecipient": "0xec4fEECa354C7eabbe8957a23c361Aa365E3b377",
+    "owner": "0xbE7Fe1f11E768f4009E0ddEA7041f38093414cd3",
+    "maxPerLease": 20000000,
+    "maxLeaseHours": 168,
+    "feeBps": 300,
+    "cfVault": "0x79001a5e762f3bEFC8e5871b42F6734e00498920",
+    "maxRelayFee": 1000000
+  },
+  "previous": [
+    {
+      "address": "0x07bbe156083EbBcc9435C721393Edd36a383E648",
+      "tx": "0xfb514a4f94049d1679b0c10ed3983be07b21151774b8a14257efa1432584637c",
+      "block": 514036941,
+      "note": "v0.1.0, no fundWithPermit; still live and unpaused, not touched"
+    }
+  ]
+}

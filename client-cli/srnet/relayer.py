@@ -1,0 +1,149 @@
+"""Minimal SRNet top-up relayer. Anyone may run one.
+
+POST /fund  {chainid, contract, intent, sig, permit}  (as built by gasless.sign_topup)
+
+It holds only its own gas key and its earned relay fees (credited inside SRNetBalance to
+payableOf[relayer]; withdraw with withdrawPayable). It never holds user USDC.
+
+Guards: per-IP and per-owner rate limits, minimum fee, contract allow-list, simulation via
+eth_estimateGas before sending, per-tx gas cap and a rolling 24h gas budget in wei.
+
+  SRNET_RELAYER_KEY=0x... SRNET_RPC=... python -m srnet.relayer --contract 0x... [--port 8645]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import threading
+import time
+from collections import defaultdict, deque
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from . import chain, gasless
+
+
+class RateLimiter:
+    def __init__(self, limit: int, window: float, clock=time.time):
+        self.limit, self.window, self.clock = limit, window, clock
+        self.hits: dict = defaultdict(deque)
+
+    def allow(self, key: str) -> bool:
+        now, q = self.clock(), self.hits[key]
+        while q and q[0] <= now - self.window:
+            q.popleft()
+        if len(q) >= self.limit:
+            return False
+        q.append(now)
+        return True
+
+
+class GasBudget:
+    def __init__(self, wei_per_day: int, clock=time.time):
+        self.cap, self.clock, self.spent = wei_per_day, clock, deque()
+
+    def remaining(self) -> int:
+        now = self.clock()
+        while self.spent and self.spent[0][0] <= now - 86400:
+            self.spent.popleft()
+        return self.cap - sum(w for _, w in self.spent)
+
+    def charge(self, wei: int) -> None:
+        self.spent.append((self.clock(), int(wei)))
+
+
+class Relayer:
+    def __init__(self, ch, *, min_fee: int = 50_000, max_gas_per_tx: int = 2 * 10**14,
+                 gas_budget_wei: int = 5 * 10**15, ip_limit=(10, 3600), owner_limit=(5, 3600), clock=time.time):
+        self.ch, self.min_fee, self.max_gas_per_tx = ch, min_fee, max_gas_per_tx
+        self.budget = GasBudget(gas_budget_wei, clock)
+        self.by_ip, self.by_owner = RateLimiter(*ip_limit, clock), RateLimiter(*owner_limit, clock)
+        self.lock = threading.Lock()
+
+    def handle(self, req: dict, ip: str = "?") -> tuple[int, dict]:
+        try:
+            i = req["intent"]
+            owner = i["owner"]
+            if int(req.get("chainid", -1)) != self.ch.chainid():
+                return 400, {"error": "wrong chain"}
+            if req.get("contract", "").lower() != self.ch.contract.lower():
+                return 400, {"error": "unknown contract"}
+            if int(i["relayFee"]) < self.min_fee:
+                return 400, {"error": f"relay fee below this relayer's minimum {self.min_fee}"}
+            rel = i["relayer"].lower()
+            if rel not in (gasless.ZERO, self.ch.address().lower()):
+                return 400, {"error": "intent is pinned to another relayer"}
+            if int(i["deadline"]) < time.time() + 30:
+                return 400, {"error": "intent expires too soon"}
+            data = gasless.encode_fund_call(req)
+        except (KeyError, ValueError, TypeError) as e:
+            return 400, {"error": f"bad request: {e}"}
+        if not self.by_ip.allow(ip) or not self.by_owner.allow(owner.lower()):
+            return 429, {"error": "rate limited"}
+        with self.lock:
+            cap = min(self.max_gas_per_tx, self.budget.remaining())
+            if cap <= 0:
+                return 503, {"error": "relayer gas budget used up for today"}
+            try:
+                rc = self.ch.send_data(data, max_gas=cap)  # estimateGas simulates; reverts never get sent
+            except chain.ChainError as e:
+                return 422, {"error": str(e)}
+            used = int(rc["gasUsed"], 16) * int(rc.get("effectiveGasPrice", "0x0"), 16)
+            self.budget.charge(used)
+        return 200, {"ok": True, "tx": rc["transactionHash"], "gas_wei": used}
+
+
+def serve(relayer: Relayer, host: str = "127.0.0.1", port: int = 8645) -> ThreadingHTTPServer:
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.path != "/fund":
+                return self._out(404, {"error": "not found"})
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 8192:
+                return self._out(413, {"error": "too large"})
+            try:
+                req = json.loads(self.rfile.read(n))
+            except json.JSONDecodeError:
+                return self._out(400, {"error": "bad json"})
+            self._out(*relayer.handle(req, self.client_address[0]))
+
+        def _out(self, code, obj):
+            b = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer((host, port), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="srnet-relayer")
+    ap.add_argument("--contract", required=True)
+    ap.add_argument("--rpc", default=os.environ.get("SRNET_RPC"))
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8645)
+    ap.add_argument("--min-fee", type=int, default=50_000, help="USDC base units (default 0.05)")
+    ap.add_argument("--max-gas-per-tx-wei", type=int, default=2 * 10**14, help="refuse a relay costing more")
+    ap.add_argument("--gas-budget-wei", type=int, default=5 * 10**15, help="per rolling 24h")
+    a = ap.parse_args(argv)
+    key = os.environ.get("SRNET_RELAYER_KEY")
+    if not key:
+        raise SystemExit("set SRNET_RELAYER_KEY to the relayer's own gas key (not a user or owner key)")
+    ch = chain.ChainCfg(rpc=a.rpc, contract=a.contract, private_key=key)
+    if ch.chainid() in chain.MAINNET_CHAINS and os.environ.get("SRNET_RELAYER_MAINNET") != "1":
+        raise SystemExit("refusing mainnet without SRNET_RELAYER_MAINNET=1")
+    serve(Relayer(ch, min_fee=a.min_fee, max_gas_per_tx=a.max_gas_per_tx_wei, gas_budget_wei=a.gas_budget_wei), a.host, a.port)
+    print(f"relayer {ch.address()} on {a.host}:{a.port} for {a.contract}")
+    threading.Event().wait()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

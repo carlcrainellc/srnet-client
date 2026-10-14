@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRNet typed client</title><link rel="stylesheet" href="/shell.css"><script src="/shell.js" defer></script></head>
+<body>
+<header id="core-bar"><strong>SRNet</strong> <span class="muted">typed client core</span>
+  <nav id="tabs"></nav>
+  <button id="modtoggle">Show host-hidden</button>
+  <span id="status" class="muted"></span></header>
+<section id="upload" hidden>Share a file: <input type="file" id="file"> <input id="note" placeholder="note (optional)" maxlength="500"> <button id="send-file">Upload &amp; draft</button></section>
+<main><iframe id="tpl" sandbox="allow-scripts" referrerpolicy="no-referrer" title="template"></iframe></main>
+<div id="sheet" hidden><div class="card"><h3 id="sheet-title"></h3><div class="muted" id="sheet-sub"></div>
+  <pre id="sheet-body"></pre><div id="sheet-buttons"></div></div></div>
+<pre id="report" hidden></pre>
+<footer class="muted">The core verifies every record. Templates run sandboxed with no network and never see your keys. Only the core signs, after you confirm.</footer>
+</body></html>
