@@ -1,5 +1,9 @@
 """Windows CI check: the installed `srnet ui` and `srnet snapps` start and answer on loopback."""
 import json, os, subprocess, sys, tempfile, time, urllib.request
+
+
+def kill(p):  # cmd /c spawns python as a child: end the whole tree
+    subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
 from pathlib import Path
 
 srnet = Path(os.environ["LOCALAPPDATA"]) / "srnet-client" / "bin" / "srnet.cmd"
@@ -17,7 +21,7 @@ assert url, "srnet ui did not print its URL"
 page = urllib.request.urlopen(url, timeout=10).read().decode()
 assert "Wallet / Top up" in page and "Exits" in page and "SNApps" in page
 print("PASS srnet ui", url.split("?")[0])
-ui.terminate()
+kill(ui)
 
 # snapps: a local testbed config, then the installed launcher serves the shell page
 sys.path.insert(0, str(Path(os.environ["LOCALAPPDATA"]) / "srnet-client" / "app" / "snapps"))
@@ -33,6 +37,6 @@ for _ in range(60):
         ok = b"SRNet" in urllib.request.urlopen("http://127.0.0.1:48931/", timeout=3).read(); break
     except OSError:
         time.sleep(1)
-sn.terminate()
+kill(sn)
 assert ok, "srnet snapps did not serve"
 print("PASS srnet snapps")

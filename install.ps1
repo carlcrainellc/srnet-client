@@ -13,7 +13,8 @@ function Remove-FromUserPath($dir) {
 }
 
 if ($Uninstall) {
-  if (Test-Path $Prefix) { Remove-Item -Recurse -Force $Prefix }
+  try { if (Test-Path $Prefix) { Remove-Item -Recurse -Force $Prefix } }
+  catch { Write-Error "SRNet is still running. Close the SRNet window (and any 'srnet' terminals), then run -Uninstall again." }
   if (Test-Path $Menu) { Remove-Item -Recurse -Force $Menu }
   Remove-FromUserPath $Bin
   Write-Host "Removed the SRNet client. Your wallet and settings in $HOME\.srnet were left in place."
