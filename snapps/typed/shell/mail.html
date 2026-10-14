@@ -22,7 +22,8 @@
   <input id="c-to" placeholder="to: name or srnet://mail/… link" size="60"><br>
   <input id="c-subject" placeholder="subject" maxlength="200" size="60"><br>
   <textarea id="c-body" rows="12" cols="70" maxlength="49152"></textarea><br>
-  <input id="c-attach" placeholder="attachments: encrypted file links from a file drop, one per line" size="60"><br>
+  Attach: <input type="file" id="c-file" multiple> <span class="muted">(encrypted on this computer, stored on your file drop; only people you send the message to get the key)</span><br>
+  <input id="c-attach" placeholder="or paste encrypted file links, separated by spaces" size="60"><br>
   <button id="c-send">Seal &amp; send</button> <button id="c-cancel">Cancel</button>
 </section>
 </main>

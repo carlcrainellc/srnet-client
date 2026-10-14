@@ -54,11 +54,17 @@ async function openMsg(id) {
 async function refresh_counts() { const s = await api("summary"); $("u-inbox").textContent = s.unread.inbox ? "(" + s.unread.inbox + ")" : ""; $("u-requests").textContent = s.unread.requests ? "(" + s.unread.requests + ")" : ""; }
 function compose(to, subj) {
   $("m-list").hidden = true; $("m-view").hidden = true; $("m-compose").hidden = false;
-  $("c-to").value = to || ""; $("c-to").disabled = !!replyTo; $("c-subject").value = subj || ""; $("c-body").value = "";
+  $("c-to").value = to || ""; $("c-to").disabled = !!replyTo; $("c-subject").value = subj || ""; $("c-body").value = ""; $("c-file").value = ""; $("c-attach").value = "";
 }
+function b64(buf) { let s = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); return btoa(s); }
 $("c-send").addEventListener("click", async () => {
   const attach = $("c-attach").value.split(/\s+/).filter(Boolean);
   try {
+    for (const f of $("c-file").files) {
+      status("encrypting " + f.name + "…");
+      const r = await api("attach", {data: b64(await f.arrayBuffer()), name: f.name, mime: f.type || "application/octet-stream"});
+      attach.push(r.link);
+    }
     const r = replyTo ? await api("reply", {id: replyTo, body: $("c-body").value, attach})
                       : await api("send", {to: $("c-to").value.trim(), subject: $("c-subject").value, body: $("c-body").value, attach});
     status(r.ok ? "sent to " + Object.keys(r.hosts).length + " host(s)" : "not delivered: " + JSON.stringify(r.hosts));

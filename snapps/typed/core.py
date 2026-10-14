@@ -150,7 +150,8 @@ class Core:
         self.blob_cache.mkdir(exist_ok=True)
         # mail: same identity as posting (author.key); sealed store under <data>/mail
         self.mail = MailClient(self.dir / "mail", kp.read_bytes(),
-                               (config.get("mail") or {}).get("hosts", []), clock=clock)
+                               (config.get("mail") or {}).get("hosts", []), clock=clock,
+                               attacher=self.mail_attach)
 
     def save(self):
         with self.lock:
@@ -612,6 +613,20 @@ class Core:
                 continue
         return False
 
+    def mail_attach(self, data: bytes, filename: str, mime: str) -> str:
+        """One-click mail attachment: encrypt, store the blob on a joined file drop, return
+        its key-in-fragment link. No drop record is posted, so it isn't listed publicly."""
+        drops = [c for c in self.colls.values() if c.kind == "drop" and c.hosts]
+        if not drops:
+            raise MAIL.MailError("join a file drop first: attachments are stored there, encrypted")
+        pref = (self.config.get("mail") or {}).get("attach_drop")
+        drops.sort(key=lambda c: c.name != pref)
+        blob, key = FC.encrypt(data, filename, mime)
+        for c in drops:
+            if self._put_blob(c, blob):
+                return FC.link(c.hosts[0], hashlib.sha256(blob).hexdigest(), key)
+        raise MAIL.MailError("no file-drop host took the attachment")
+
     def _drop(self, name):
         c = self.colls[name]
         if c.kind != "drop":
@@ -883,7 +898,7 @@ def make_handler(core: Core, test_mode=False):
             if not u.path.startswith("/api/") or not self._api_ok():
                 return self._json(403, {"error": "core API: trusted shell only"})
             n = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(min(n, FC.MAX_PLAIN + (64 << 10)))
+            raw = self.rfile.read(min(n, (FC.MAX_PLAIN * 4 // 3 if u.path == "/api/mail/attach" else FC.MAX_PLAIN) + (64 << 10)))
             p = u.path[5:]
             try:
                 if p == "upload":
@@ -899,7 +914,7 @@ def make_handler(core: Core, test_mode=False):
                 if p.startswith("mail/"):
                     try:
                         return self._json(200, core.mail.api(p[5:], a))
-                    except MAIL.MailError as e:
+                    except (MAIL.MailError, FC.CryptoError) as e:
                         return self._json(400, {"ok": False, "error": str(e)})
                 if p in ("file/open", "file/openlink"):
                     data, fname, mime = (core.open_file(a["c"], a["id"]) if p == "file/open"

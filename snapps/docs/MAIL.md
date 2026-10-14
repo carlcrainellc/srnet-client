@@ -27,12 +27,12 @@ Contact tag (host-side spam sorting without revealing the sender):
 
 
 The host stores opaque sealed blobs per recipient (Ed25519 identity), deletes them when the
-recipient fetches them, and purges expired ones.  It never sees content or senders.
+recipient acks them after saving (fetch, then ack), and purges expired ones.  It never sees content or senders.
 
   GET  /v1/mail/info                       host id, limits, optional delegation
   POST /v1/mail/put        {to,msg_id,blob,ttl?,tag?,stamp?}
   POST /v1/mail/challenge  {to}            -> {nonce}   (single use, 120 s)
-  POST /v1/mail/auth       {to,op,nonce,args,sig}   op: register | list | fetch | tags
+  POST /v1/mail/auth       {to,op,nonce,args,sig}   op: register | list | fetch | ack | tags
 
 Piles: mail whose contact tag matches one the recipient uploaded goes to "inbox"; everything
 else to "requests" (smaller size limit, fewer messages, rate-limited per recipient).
@@ -41,11 +41,18 @@ else to "requests" (smaller size limit, fewer messages, rate-limited per recipie
 
 ## Auth
 
-Every inbox operation (`register`, `list`, `fetch`, `tags`) takes a fresh nonce from
+Every inbox operation (`register`, `list`, `fetch`, `ack`, `tags`) takes a fresh nonce from
 `/v1/mail/challenge` (single use, 120 s) and an Ed25519 signature by the inbox key over
 `canonical("srnet-mail/auth/v1", {host, to, op, nonce, args: sha256(args)})`. `host` is
 the mail host's own key, so a signature can't be replayed on another host. Clients pin
 the host key on first use.
+
+## Fetch, then ack
+
+`fetch` returns sealed blobs but keeps them. The client writes them to disk, then sends `ack`
+with the ids it saved (including ones it rejected); only `ack` deletes. Unacked mail stays until
+its TTL. A crash between fetch and ack just means the next fetch sees duplicates, which the
+client drops by msg id.
 
 ## Defaults
 

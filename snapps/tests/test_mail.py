@@ -145,12 +145,17 @@ class HostUnit(unittest.TestCase):
         self.now[0] += 8 * 86400
         self.assertEqual(self.h.purge(), len(lst) - 1)
 
-    def test_fetch_deletes(self):
+    def test_fetch_keeps_until_ack(self):
         self.auth(self.bk, "register")
         self.put()
         ids = [m["msg_id"] for m in self.auth(self.bk, "list")[1]["msgs"]]
         self.assertEqual(len(self.auth(self.bk, "fetch", {"ids": ids})[1]["msgs"]), 1)
+        self.assertEqual(len(self.auth(self.bk, "list")[1]["msgs"]), 1)  # still there
+        self.assertEqual(self.auth(self.bk, "ack", {"ids": ids})[1]["deleted"], 1)
         self.assertEqual(self.auth(self.bk, "list")[1]["msgs"], [])
+        self.put()  # unacked mail goes at TTL
+        self.now[0] += 7 * 86400 + 1
+        self.assertEqual(self.h.purge(), 1)
 
     def test_stamp_hook(self):
         self.auth(self.bk, "register")
@@ -184,7 +189,8 @@ class E2E(unittest.TestCase):
     def no_plaintext_on_disk(self, needles):
         for root, _, files in os.walk(self.t):
             for f in files:
-                data = open(os.path.join(root, f), "rb").read()
+                with open(os.path.join(root, f), "rb") as fh:
+                    data = fh.read()
                 for n in needles:
                     self.assertNotIn(n.encode(), data, f"plaintext in {os.path.join(root, f)}")
 
@@ -218,6 +224,26 @@ class E2E(unittest.TestCase):
         m = [x for x in self.bob.folder("inbox") if x["subject"] == "file"][0]
         self.assertEqual(self.bob.open(m["msg_id"])["attach"], [att])
         self.no_plaintext_on_disk([SECRET, "Plans", "see attached", "attached!"])
+
+    def test_crash_before_ack_keeps_mail(self):
+        self.alice.send(self.bob.link(), "s", SECRET)
+        real = self.bob._auth
+
+        def no_ack(h, op, args=None):
+            if op == "ack":
+                raise OSError("client died before ack")
+            return real(h, op, args)
+        self.bob._auth = no_ack
+        f = self.bob.fetch()
+        self.assertEqual(f["new"], 1)  # saved locally
+        self.assertTrue(f["errors"])
+        for h in self.urls[1:]:  # host still holds it
+            self.assertEqual(len(real(h, "list")["msgs"]), 1)
+        self.bob._auth = real
+        f = self.bob.fetch()  # retried: deduped, then acked
+        self.assertEqual((f["new"], f["errors"]), (0, {}))
+        for h in self.urls[1:]:
+            self.assertEqual(real(h, "list")["msgs"], [])
 
     def test_one_host_down_still_delivers(self):
         link = self.bob.link()
@@ -311,4 +337,35 @@ class CoreAPI(unittest.TestCase):
         finally:
             for s_ in (srv, hs):
                 s_.shutdown(); s_.server_close()
+            shutil.rmtree(t, ignore_errors=True)
+
+
+class OneClickAttach(unittest.TestCase):
+    def test_attach_uploads_to_link_drop(self):
+        from typed import testbed as T
+        from typed.core import Core
+        env = T.start(mirror=False)
+        t = tmpdir()
+        hs = MH.serve(MH.Host(os.path.join(t, "h")), purge=False)
+        try:
+            cfg = dict(T.client_config(env), mail={"hosts": [f"http://127.0.0.1:{hs.server_address[1]}"]})
+            a = Core(os.path.join(t, "a"), cfg, autoconfirm=True)
+            b = Core(os.path.join(t, "b"), cfg, autoconfirm=True)
+            a.mail.register(); b.mail.register()
+            secret = b"ATTACHED-" + SECRET.encode()
+            link = a.mail.api("attach", {"data": M.b64e(secret), "name": "plan.txt", "mime": "text/plain"})["link"]
+            self.assertIn("#k=", link)
+            a.mail.send(b.mail.link(), "with file", "see file", [link])
+            b.mail.fetch()
+            m = b.mail.open(b.mail.folder("requests")[0]["msg_id"])
+            data, name, _ = b.open_link(m["attach"][0])
+            self.assertEqual((data, name), (secret, "plan.txt"))
+            for top in (str(env["tmp"]), t):
+                for root, _, files in os.walk(top):
+                    for f in files:
+                        with open(os.path.join(root, f), "rb") as fh:
+                            self.assertNotIn(b"ATTACHED-", fh.read(), os.path.join(root, f))
+        finally:
+            hs.shutdown(); hs.server_close()
+            T.stop(env)
             shutil.rmtree(t, ignore_errors=True)

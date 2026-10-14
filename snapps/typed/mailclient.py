@@ -18,13 +18,15 @@ FOLDERS = ("inbox", "requests")
 
 
 class MailClient:
-    def __init__(self, data_dir, seed: bytes, hosts=(), clock=time.time, http=http_json):
+    def __init__(self, data_dir, seed: bytes, hosts=(), clock=time.time, http=http_json,
+                 attacher=None):
         self.dir = Path(data_dir)
         (self.dir / "msgs").mkdir(parents=True, exist_ok=True)
         self.key = F.key_from_seed(seed)
         self.xkey = FC.x25519_from_seed(seed)
         self.me = F.pub_hex(self.key)
         self.clock, self.http = clock, http
+        self.attacher = attacher  # (bytes, filename, mime) -> encrypted file-drop link
         self.st = {"hosts": [], "contacts": {}, "petnames": {}, "index": {}, "blocked": [],
                    "host_ids": {}}
         p = self.dir / "mail.json"
@@ -188,7 +190,9 @@ class MailClient:
                 lst = self._auth(h, "list")["msgs"]
                 ids = [m["msg_id"] for m in lst]
                 for i in range(0, len(ids), 64):
-                    for m in self._auth(h, "fetch", {"ids": ids[i:i + 64]})["msgs"]:
+                    got = self._auth(h, "fetch", {"ids": ids[i:i + 64]})["msgs"]
+                    done = []
+                    for m in got:
                         r = self._accept(m["msg_id"], M.b64d(m["blob"]))
                         if r == "new":
                             new += 1
@@ -196,6 +200,10 @@ class MailClient:
                             dups += 1
                         else:
                             rejected.append({"msg_id": m["msg_id"], "host": h, "why": r})
+                        done.append(m["msg_id"])
+                    self.save()  # index + sealed files are on disk before the host may delete
+                    if done:
+                        self._auth(h, "ack", {"ids": done})
             except Exception as e:
                 errors[h] = str(e)
         self.save()
@@ -309,6 +317,11 @@ class MailClient:
             return {"msgs": self.folder(a.get("folder", "inbox"))}
         if op == "open":
             return self.open(a["id"])
+        if op == "attach":
+            if not self.attacher:
+                raise M.MailError("join a file drop first: attachments are stored there, encrypted")
+            return {"ok": True, "link": self.attacher(M.b64d(a["data"]), a.get("name", "file")[:128],
+                                                      a.get("mime", "application/octet-stream")[:80])}
         if op == "send":
             return self.send(a["to"], a.get("subject", ""), a.get("body", ""), a.get("attach", []))
         if op == "reply":

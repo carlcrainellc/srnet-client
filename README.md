@@ -20,7 +20,7 @@ One app for SRNet: typed SNApps, the exit marketplace, and your SRNet balance.
 ## Mail
 
 Your mail address is your SRNet identity key plus the 1 to 3 mail hosts you pick, shared as a
-`srnet://mail/...` link. Open **Mail** in the SNApps window, or use the command line:
+`srnet://mail/...` link. Open **Mail** at the top of the SNApps sidebar, or use the command line:
 
 ```sh
 srnet mail hosts http://<mail host> [http://<backup host>]   # set your hosts and register
@@ -35,15 +35,16 @@ srnet mail name 'srnet://room/...' "Bob's room"              # local petname for
   ChaCha20-Poly1305) and padded to a size bucket (1 KiB to 64 KiB). A mail host sees only
   the recipient key, the message id, the padded size and the time.
 - Messages go to every host on the recipient's list; your client drops duplicates.
-- Hosts keep mail 7 days by default (30 at most) and delete it when you fetch it. Your
+- Hosts keep mail 7 days by default (30 at most) and delete it only after your client has saved it and acknowledged it (fetch, then ack). Mail that is never acknowledged is deleted when it expires. Your
   client keeps it sealed on disk and opens it only to show it.
 - Reading an inbox needs a fresh signed challenge from the owner's key. Nobody else can list
   or fetch it.
 - Mail from your contacts goes to **Inbox**. Mail from anyone else goes to **Requests**, which
   has tighter limits (32 messages, 16 KiB each, 20 per hour). Accepting a sender moves them
   to your inbox on every host without telling the host who they are.
-- Attachments are encrypted file-drop links (*Encrypted: anyone with the link*), carried
-  inside the sealed message.
+- **Attach** a file in the Mail page and it is encrypted on your computer and stored on a file
+  drop you've joined (no public listing). Only the key-in-link goes inside the sealed message,
+  so only your recipients can open it. Max 4 MiB per file. You can also paste file-drop links.
 - Petnames are local only. Links can suggest a name; your own name always wins.
 
 Wire format and host API: [`snapps/docs/MAIL.md`](snapps/docs/MAIL.md).

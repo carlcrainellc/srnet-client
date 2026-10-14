@@ -1,12 +1,12 @@
 """SRNet mail host: store-and-forward of sealed mail. Loopback by default.
 
 The host stores opaque sealed blobs per recipient (Ed25519 identity), deletes them when the
-recipient fetches them, and purges expired ones.  It never sees content or senders.
+recipient acks them after saving (fetch, then ack), and purges expired ones.  It never sees content or senders.
 
   GET  /v1/mail/info                       host id, limits, optional delegation
   POST /v1/mail/put        {to,msg_id,blob,ttl?,tag?,stamp?}
   POST /v1/mail/challenge  {to}            -> {nonce}   (single use, 120 s)
-  POST /v1/mail/auth       {to,op,nonce,args,sig}   op: register | list | fetch | tags
+  POST /v1/mail/auth       {to,op,nonce,args,sig}   op: register | list | fetch | ack | tags
 
 Piles: mail whose contact tag matches one the recipient uploaded goes to "inbox"; everything
 else to "requests" (smaller size limit, fewer messages, rate-limited per recipient).
@@ -204,8 +204,17 @@ class Host:
                         d = self._box(to, m["pile"])
                         with open(os.path.join(d, m["msg_id"] + ".bin"), "rb") as f:
                             out.append({"msg_id": m["msg_id"], "pile": m["pile"], "blob": M.b64e(f.read())})
-                        self._rm(d, m["msg_id"])  # fetch is the ack
-                return 200, {"ok": True, "msgs": out}
+                return 200, {"ok": True, "msgs": out}  # kept until "ack" (or TTL)
+            if op == "ack":
+                ids = args.get("ids")
+                if not isinstance(ids, list) or len(ids) > 64:
+                    return 400, {"ok": False, "error": "bad ids"}
+                n = 0
+                for m in self._metas(to):
+                    if m["msg_id"] in ids:
+                        self._rm(self._box(to, m["pile"]), m["msg_id"])
+                        n += 1
+                return 200, {"ok": True, "deleted": n}
         return 400, {"ok": False, "error": "unknown op"}
 
     def _rm(self, d, mid):
