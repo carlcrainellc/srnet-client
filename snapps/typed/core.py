@@ -34,6 +34,8 @@ from . import joins as J
 from . import adapters, filecrypt as FC, htmlview, views
 from .record import BOARD, KIND_TYPES, TESTNET_CHAINS, codec_for, make_record
 from .registry import RegistryError, TemplateManager
+from . import mail as MAIL
+from .mailclient import MailClient
 from .store import Store
 from .sync import SyncError, http_json, submit, sync_once
 
@@ -146,6 +148,9 @@ class Core:
         self.config, self.pending_pay = config, {}
         self.blob_cache = self.dir / "blobs"
         self.blob_cache.mkdir(exist_ok=True)
+        # mail: same identity as posting (author.key); sealed store under <data>/mail
+        self.mail = MailClient(self.dir / "mail", kp.read_bytes(),
+                               (config.get("mail") or {}).get("hosts", []), clock=clock)
 
     def save(self):
         with self.lock:
@@ -832,7 +837,9 @@ def make_handler(core: Core, test_mode=False):
             q = parse_qs(u.query)
             static = {"/": ("shell.html", "text/html; charset=utf-8"),
                       "/shell.js": ("shell.js", "text/javascript; charset=utf-8"),
-                      "/shell.css": ("shell.css", "text/css; charset=utf-8")}
+                      "/shell.css": ("shell.css", "text/css; charset=utf-8"),
+                      "/mail": ("mail.html", "text/html; charset=utf-8"),
+                      "/mail.js": ("mail.js", "text/javascript; charset=utf-8")}
             if u.path in static:
                 n, ct = static[u.path]
                 return self._send(200, (SHELL / n).read_bytes(), ct)
@@ -889,6 +896,11 @@ def make_handler(core: Core, test_mode=False):
                     return self._json(200, core.upload(*args, mode=q.get("mode", ["gated"])[0],
                                                        recipients=rec))
                 a = json.loads(raw or b"{}")
+                if p.startswith("mail/"):
+                    try:
+                        return self._json(200, core.mail.api(p[5:], a))
+                    except MAIL.MailError as e:
+                        return self._json(400, {"ok": False, "error": str(e)})
                 if p in ("file/open", "file/openlink"):
                     data, fname, mime = (core.open_file(a["c"], a["id"]) if p == "file/open"
                                          else core.open_link(a["link"]))

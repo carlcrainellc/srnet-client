@@ -10,7 +10,7 @@
   <select id="mode"><option value="gated" selected>Encrypted: only me and people I choose</option><option value="link">Encrypted: anyone with the link</option><option value="plain">Not encrypted: public and indexable</option></select>
   <input id="to" placeholder="share with (keys, comma-separated)" size="30"> <button id="send-file">Encrypt, upload &amp; draft</button>
   <span class="muted">· Open a link: <input id="openlink" size="30" placeholder="paste a file link"> <button id="openlink-go">Open</button></span></section>
-<div id="layout"><aside id="side"><div class="muted">Joined</div><div id="groups"></div></aside>
+<div id="layout"><aside id="side"><a id="side-mail" class="item" href="/mail">Mail <span id="side-mail-n"></span></a><div class="muted">Joined</div><div id="groups"></div></aside>
 <main><section id="home" hidden><h2>Join a collection</h2>
   <p class="muted">Paste a .sesh address or an srnet:// link someone shared with you. The core fetches the host's signed info and shows it before anything is saved.</p>
   <input id="joinlink" size="70" maxlength="400" placeholder="srnet://….sesh/board/lobby#root=…"> <button id="join-go">Look up</button>

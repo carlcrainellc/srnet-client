@@ -25,3 +25,10 @@ main{flex:1;min-width:0}
 #home,#wallet{padding:16px}
 #ribbon button.on{border-color:#3b6;color:#3b6}
 .danger{border-color:#f66!important;color:#f66}
+/* mail */
+#mail { display: flex; gap: 1em; }
+#m-side { width: 16em; display: flex; flex-direction: column; gap: .3em; }
+#m-list, #m-view, #m-compose { flex: 1; }
+.m-row { padding: .4em; border-bottom: 1px solid #ddd; cursor: pointer; }
+.m-row.unread strong { font-weight: 800; }
+#m-view pre { white-space: pre-wrap; }
