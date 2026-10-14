@@ -9,6 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "vendor")]
+if sys.platform == "win32":  # the seller side (admission store) is Linux-only
+    raise unittest.SkipTest("seller receiver/watcher run on Linux")
 import admission as A  # noqa: E402
 import claim_receiver as R  # noqa: E402
 import watcher as W  # noqa: E402

@@ -30,7 +30,8 @@ class Keystore(unittest.TestCase):
     def test_import_unlock_roundtrip(self):
         self.assertEqual(keys.write(self.ks, KEY, "pw", iterations=FAST), ADDR)
         self.assertEqual(keys.unlock(self.ks, "pw"), KEY)
-        self.assertEqual(stat.S_IMODE(os.stat(self.ks).st_mode), 0o600)
+        if sys.platform != "win32":  # Windows: protected by the user-profile ACL, not mode bits
+            self.assertEqual(stat.S_IMODE(os.stat(self.ks).st_mode), 0o600)
         self.assertEqual(keys.address_of(self.ks).lower(), ADDR.lower())
         self.assertNotIn(KEY[2:], self.ks.read_text())
 
