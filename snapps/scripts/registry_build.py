@@ -15,7 +15,8 @@ TYPES = {"board": ["board.post@1", "mod.hide@1"], "room": ["room.msg@1", "room.t
          "profile": ["id.profile@1", "id.rotate@1", "id.link@1"],
          "shop": ["shop.listing@1", "shop.withdraw@1", "shop.review@1", "shop.order@1"],
          "drop": ["drop.item@1", "drop.grant@1", "drop.revoke@1", "drop.request@1"],
-         "exit": ["exit.listing@v2-legacy"], "card": ["snapp.card@legacy"]}
+         "exit": ["exit.listing@v2-legacy"], "card": ["snapp.card@legacy"],
+         "directory": ["directory.entry@1", "id.profile@1"]}
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--key", default=os.environ.get("SRNET_REGISTRY_KEY") or os.path.expanduser("~/.srnet-dev-keys/registry.key"))

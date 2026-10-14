@@ -29,6 +29,7 @@ KIND_POLICY = {  # lighter limits for rooms; heavier for wiki/shop;
     "shop": {"rate": [[20, 3600]], "pow_bits": 14, "new_key_pow_bits": 16},
     "drop": {"rate": [[10, 3600]], "pow_bits": 14, "new_key_pow_bits": 16},
     "id": {"rate": [[10, 3600]], "pow_bits": 12, "new_key_pow_bits": 14},
+    "directory": {"rate": [[20, 3600]], "pow_bits": 12, "new_key_pow_bits": 14},
 }
 
 

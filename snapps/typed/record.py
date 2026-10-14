@@ -343,6 +343,12 @@ DROP_REVOKE = TypeSpec("drop.revoke", 1, {"to": keyhex()}, 1)
 DROP_REQUEST = TypeSpec("drop.request", 1, {"enc_key": keyhex(),
                                             "note": text(200, required=False)}, 1)
 
+# Directory: a host operator lists their own collection by signing an entry with that
+# collection's root key (the key in the link's #root=). Entries signed by anyone else are ignored.
+DIRECTORY_ENTRY = TypeSpec("directory.entry", 1, {
+    "link": pattern(r"srnet://[a-z0-9.:\[\]]{1,80}/[a-z]{2,12}/[a-z][a-z0-9_-]{0,31}#root=[0-9a-f]{64}", what="link"),
+    "title": text(80, multiline=False), "desc": text(500, required=False)}, 0)
+
 PROFILE_TYPES = (ID_PROFILE, ID_ROTATE, ID_LINK)
 KIND_TYPES = {
     "room": TypeSet(ROOM_MSG, ROOM_TOPIC, ROOM_JOIN, *PROFILE_TYPES),
@@ -350,6 +356,7 @@ KIND_TYPES = {
     "shop": TypeSet(SHOP_LISTING, SHOP_WITHDRAW, SHOP_REVIEW, SHOP_ORDER, *PROFILE_TYPES),
     "drop": TypeSet(DROP_ITEM, DROP_GRANT, DROP_REVOKE, DROP_REQUEST, *PROFILE_TYPES),
     "id": TypeSet(*PROFILE_TYPES),
+    "directory": TypeSet(DIRECTORY_ENTRY, *PROFILE_TYPES),
 }
 ROOM_TYPES = KIND_TYPES["room"]
 

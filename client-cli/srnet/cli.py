@@ -616,6 +616,26 @@ def cmd_snapps(args, st: state.State) -> int:
     return subprocess.call(cmd, cwd=str(root))
 
 
+def cmd_open(args, st: state.State) -> int:
+    """srnet:// link handler: validate the link, then open the running client's join sheet.
+    Nothing is joined until you click Join there."""
+    root = Path(os.environ.get("SRNET_SNAPPS_DIR") or Path(__file__).resolve().parents[2] / "snapps")
+    sys.path.insert(0, str(root))
+    from typed import joins
+    try:
+        joins.parse(args.link)
+    except joins.LinkError as e:
+        print(f"not a valid SRNet link: {e}", file=sys.stderr)
+        return 2
+    from urllib.parse import quote
+    url = f"http://127.0.0.1:{args.port}/?join=" + quote(args.link.strip(), safe="")
+    print(url)
+    if not args.print_only:
+        import webbrowser
+        webbrowser.open(url)
+    return 0
+
+
 def cmd_ui(args, st: state.State) -> int:
     from . import ui
     return ui.run(st, rpc_url=args.rpc, open_browser=not args.no_browser)
@@ -727,6 +747,11 @@ def main(argv=None) -> int:
     sn.add_argument("--data", help="data dir (default <home>/snapps)")
     sn.add_argument("--port", type=int, default=48920)
 
+    op = sub.add_parser("open", help="open an srnet:// link in the SNApps client (shows the join sheet)")
+    op.add_argument("link")
+    op.add_argument("--port", type=int, default=48920)
+    op.add_argument("--print-only", action="store_true", help="print the URL, don't open a browser")
+
     u = sub.add_parser("ui", help="local web page on 127.0.0.1 (opens your browser)")
     u.add_argument("--no-browser", action="store_true", help="print the URL only")
     u.add_argument("--rpc")
@@ -744,6 +769,7 @@ def main(argv=None) -> int:
         "status": cmd_status,
         "disconnect": cmd_disconnect,
         "ui": cmd_ui,
+        "open": cmd_open,
         "topup": cmd_topup,
         "snapps": cmd_snapps,
         "pay": cmd_pay,

@@ -8,7 +8,7 @@ BIN="${SRNET_BIN:-$HOME/.local/bin}"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  rm -rf "$PREFIX" "$BIN/srnet" "$BIN/srnet-relayer" "$HOME/.local/share/applications/srnet-ui.desktop"
+  rm -rf "$PREFIX" "$BIN/srnet" "$BIN/srnet-relayer" "$HOME/.local/share/applications/srnet-ui.desktop" "$HOME/.local/share/applications/srnet-open.desktop"
   echo "Removed the SRNet client. Your wallet and settings in ~/.srnet were left in place."
   exit 0
 fi
@@ -47,7 +47,11 @@ chmod 755 "$BIN/srnet" "$BIN/srnet-relayer"
 
 if [ "$(uname -s)" = "Linux" ] && [ -d "$HOME/.local/share" ]; then
   mkdir -p "$HOME/.local/share/applications"
-  sed "s#^Exec=.*#Exec=$BIN/srnet ui#" "$SRC/client-cli/srnet-ui.desktop" > "$HOME/.local/share/applications/srnet-ui.desktop"
+  sed "s#^Exec=.*#Exec=$BIN/srnet ui#" "$SRC/client-cli/srnet-ui.desktop" > "$HOME/.local/share/applications/srnet-ui.desktop" "$HOME/.local/share/applications/srnet-open.desktop"
+  # srnet:// links open the client's join sheet (nothing joins until you click Join)
+  sed "s#^Exec=.*#Exec=$BIN/srnet open %u#" "$SRC/client-cli/srnet-open.desktop" > "$HOME/.local/share/applications/srnet-open.desktop"
+  command -v xdg-mime >/dev/null && xdg-mime default srnet-open.desktop x-scheme-handler/srnet || true
+  command -v update-desktop-database >/dev/null && update-desktop-database "$HOME/.local/share/applications" || true
 fi
 
 echo

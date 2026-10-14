@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 import urllib.request
@@ -29,6 +30,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import mbfmt as F
+from . import joins as J
 from . import adapters, filecrypt as FC, htmlview, views
 from .record import BOARD, KIND_TYPES, TESTNET_CHAINS, codec_for, make_record
 from .registry import RegistryError, TemplateManager
@@ -39,7 +41,8 @@ HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "templates"
 SHELL = HERE / "shell"
 KIND_TEMPLATE = {"board": "board", "room": "room", "wiki": "wiki", "shop": "shop",
-                 "drop": "drop", "id": "profile", "exit": "exit", "card": "card"}
+                 "drop": "drop", "id": "profile", "exit": "exit", "card": "card",
+                 "directory": "directory"}
 SHELL_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
              "frame-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; "
              "frame-ancestors 'none'")
@@ -53,6 +56,7 @@ def _b64(b):
 class Coll:
     def __init__(self, core, cfg):
         self.name, self.kind = cfg["name"], cfg["kind"]
+        self.id = cfg.get("id") or self.name  # local id (unique per client); name is the protocol name
         self.cfg, self.core = cfg, core
         self.hosts = list(cfg.get("hosts", []))
         self.policy, self.last, self.view_cache = {}, {"host": None, "error": None}, None
@@ -61,7 +65,7 @@ class Coll:
             return
         self.root_pin = cfg["root_pin"]
         self.codec = codec_for(self.kind)
-        d = Path(core.dir) / "c" / self.name
+        d = Path(core.dir) / "c" / self.id
         d.mkdir(parents=True, exist_ok=True)
         self.store = Store(str(d / "cache.sqlite3"))
         self.pin = F.CheckpointPin(*self.store.head())
@@ -70,8 +74,8 @@ class Coll:
         if self.kind == "exit":
             try:
                 v = adapters.exit_view(self.hosts[0], self.cfg["pin_sesh"],
-                                       seen=self.core.prefs["exit_seen"].get(self.name))
-                self.core.prefs["exit_seen"][self.name] = v.pop("seen")
+                                       seen=self.core.prefs["exit_seen"].get(self.id))
+                self.core.prefs["exit_seen"][self.id] = v.pop("seen")
                 self.view_cache, self.last = v, {"host": self.hosts[0], "error": None}
             except Exception as e:  # stale cache stays visible, marked
                 self.last = {"host": None, "error": f"{type(e).__name__}: {e}"}
@@ -86,6 +90,8 @@ class Coll:
             except Exception as e:
                 self.last = {"host": None, "error": f"{type(e).__name__}: {e}"}
             return self.last
+        if self.last.get("root_mismatch"):
+            return self.last  # blocked until the user explicitly re-trusts
         order = sorted(self.hosts, key=lambda h: h != self.last.get("host"))
         try:
             r = sync_once(self.store, order, self.root_pin, self.name, self.pin, codec=self.codec)
@@ -93,7 +99,24 @@ class Coll:
             self.last = {"host": r["host"], "error": None, "added": r["added"]}
         except SyncError as e:
             self.last = dict(self.last, error=str(e))
+            self._check_root()
         return self.last
+
+    def _check_root(self):
+        """After a failed sync, see whether the host now names a different root key."""
+        for h in self.hosts:
+            try:
+                code, env = http_json(h + "/v1/delegation")
+                d = (env or {}).get("delegation") or {}
+                r = d.get("root")
+                if code == 200 and d.get("board") == self.name and isinstance(r, str) \
+                        and len(r) == 64 and r != self.root_pin:
+                    F.verify_delegation(env, r, self.name)  # genuinely signed by the new key
+                    self.last = dict(self.last, root_mismatch={"pinned": self.root_pin, "offered": r},
+                                     error="root key changed: blocked")
+                    return
+            except Exception:
+                continue
 
 
 class Core:
@@ -116,27 +139,223 @@ class Core:
             self.prefs.update(json.loads(self.prefs_p.read_text()))
         reg = config.get("registry") or json.loads((TEMPLATES / "registry.json").read_text())
         self.templates = TemplateManager(self.dir, reg["pin"], TEMPLATES, reg["entries"], clock)
-        self.colls = {c["name"]: Coll(self, c) for c in config.get("collections", [])}
+        self.lock = threading.RLock()
+        self._load_joined(config.get("collections", []))
         self.sites = config.get("html_sites", {})
-        self.drafts, self.lock = {}, threading.RLock()
+        self.drafts = {}
         self.config, self.pending_pay = config, {}
         self.blob_cache = self.dir / "blobs"
         self.blob_cache.mkdir(exist_ok=True)
 
     def save(self):
-        tmp = self.prefs_p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.prefs))
-        os.replace(tmp, self.prefs_p)
+        with self.lock:
+            tmp = self.prefs_p.with_suffix(f".{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(self.prefs))
+            os.replace(tmp, self.prefs_p)
 
     # ---- sync ----
     def sync(self, name=None):
         out = {}
         for c in ([self.colls[name]] if name else self.colls.values()):
-            out[c.name] = c.sync()
+            out[c.id] = c.sync()
         self.save()
         if self.prefs["outbox"]:
             self.flush_outbox()
         return out
+
+    # ---- joined collections (persisted; config entries are pre-joined) ----
+    def _load_joined(self, cfg_colls):
+        P = self.prefs
+        J, T = P.setdefault("joined", {}), P.setdefault("trust", {})
+        left = P.setdefault("left", [])
+        order = P.setdefault("order", [])
+        for c in cfg_colls:
+            cid = c.get("id") or c["name"]
+            if cid in left:
+                continue
+            ent = J.get(cid)
+            if ent is None or ent.get("source") == "config":
+                old = ent or {}
+                J[cid] = dict({"label": cid, "muted": False, "pinned": False, "read_seq": 0},
+                              **{k: old[k] for k in ("label", "muted", "pinned", "read_seq") if k in old},
+                              id=cid, source="config", cfg=dict(c, id=cid))
+                if c.get("root_pin"):
+                    # pre-joined: the config's pin is the trusted root unless the user re-trusted
+                    pin = old.get("cfg", {}).get("root_pin") if old.get("retrusted") else None
+                    J[cid]["cfg"]["root_pin"] = pin or c["root_pin"]
+                    J[cid]["retrusted"] = bool(pin)
+            if cid not in order:
+                order.append(cid)
+        self.colls = {}
+        for cid in [i for i in order if i in J] + [i for i in J if i not in order]:
+            ent = J[cid]
+            try:
+                self.colls[cid] = Coll(self, ent["cfg"])
+            except Exception:
+                continue
+            if ent["cfg"].get("root_pin"):
+                T.setdefault(self._trust_key(ent["cfg"]), ent["cfg"]["root_pin"])
+        P["order"] = list(self.colls)
+
+    @staticmethod
+    def _host_of(cfg):
+        h = (cfg.get("hosts") or [cfg.get("url") or "local"])[0]
+        return urlparse(h).netloc or h
+
+    def _trust_key(self, cfg):
+        return f"{self._host_of(cfg)}/{cfg['kind']}/{cfg['name']}"
+
+    def _new_id(self, name, host):
+        cid, i = name, 2
+        while cid in self.colls or cid in self.prefs["joined"]:
+            cid, i = f"{name}-{i}", i + 1
+        return cid
+
+    def join_preview(self, link):
+        """Parse a pasted link or .sesh address, fetch the host's signed info. Nothing is saved."""
+        l = J.parse(link)
+        if not l["kind"]:
+            ch = []
+            for o in J.offered(l["host"]):
+                try:
+                    pr = J.probe(l["host"], o["kind"], o["name"])
+                    ch.append({"link": J.make(l["host"], o["kind"], o["name"], pr["root"]),
+                               "kind": o["kind"], "name": o["name"], "root": pr["root"]})
+                except J.LinkError:
+                    continue
+            return {"host": l["host"], "choices": ch}
+        pr = J.probe(l["host"], l["kind"], l["name"])
+        if l["root"] and l["root"] != pr["root"]:
+            raise J.LinkError("the host's root key doesn't match the key in this link: not joining")
+        tk = f"{l['host']}/{l['kind']}/{l['name']}"
+        trusted = self.prefs["trust"].get(tk)
+        joined = [c.id for c in self.colls.values()
+                  if self._trust_key(c.cfg) == tk]
+        out = {"host": l["host"], "kind": l["kind"], "name": l["name"], "root": pr["root"],
+               "url": pr["url"], "rules": pr["rules"], "pinned_by_link": bool(l["root"]),
+               "first_seen": trusted is None, "already_joined": joined[:1],
+               "link": J.make(l["host"], l["kind"], l["name"], pr["root"])}
+        if trusted and trusted != pr["root"]:
+            out["root_mismatch"] = {"pinned": trusted, "offered": pr["root"]}
+        return out
+
+    def join(self, link, label=None):
+        with self.lock:
+            pv = self.join_preview(link)
+            if "choices" in pv:
+                raise J.LinkError("pick one collection from this host")
+            if pv.get("root_mismatch"):
+                return dict(pv, joined=False, error="root key changed since you first trusted this "
+                            "collection: blocked. Review it and use re-trust if you expect the change.")
+            if pv["already_joined"]:
+                return dict(pv, joined=True, id=pv["already_joined"][0])
+            cid = self._new_id(pv["name"], pv["host"])
+            cfg = {"id": cid, "name": pv["name"], "kind": pv["kind"], "hosts": [pv["url"]],
+                   "root_pin": pv["root"]}
+            self.prefs["trust"].setdefault(self._trust_key(cfg), pv["root"])  # TOFU
+            lab = (label or pv["name"]).strip()[:40] or pv["name"]
+            self.prefs["joined"][cid] = {"id": cid, "source": "link", "cfg": cfg, "label": lab,
+                                         "muted": False, "pinned": False, "read_seq": 0}
+            self.prefs["left"] = [x for x in self.prefs["left"] if x != cid]
+            self.colls[cid] = Coll(self, cfg)
+            self.prefs["order"] = list(self.colls)
+            self.save()
+        self.sync(cid)
+        return dict(pv, joined=True, id=cid)
+
+    RETRUST_PHRASE = "trust the new key"
+
+    def retrust(self, cid, offered, confirm):
+        """Explicitly replace a pinned root key. Wipes that collection's cache."""
+        c = self.colls[cid]
+        if confirm != self.RETRUST_PHRASE:
+            raise ValueError(f"type '{self.RETRUST_PHRASE}' to confirm")
+        mm = c.last.get("root_mismatch") or {}
+        if offered != mm.get("offered"):
+            pv = self.join_preview(J.make(self._host_of(c.cfg), c.kind, c.name, offered))
+            if pv["root"] != offered:
+                raise ValueError("host isn't offering that key")
+        with self.lock:
+            ent = self.prefs["joined"][cid]
+            ent["cfg"] = dict(ent["cfg"], root_pin=offered)
+            ent["retrusted"], ent["read_seq"] = True, 0
+            self.prefs["trust"][self._trust_key(ent["cfg"])] = offered
+            c.store.db.close()
+            d = self.dir / "c" / cid
+            shutil.rmtree(d, ignore_errors=True)
+            self.colls[cid] = Coll(self, ent["cfg"])
+            self.save()
+        self.sync(cid)
+        return {"id": cid, "root": offered}
+
+    def leave(self, cid):
+        with self.lock:
+            c = self.colls.pop(cid)
+            ent = self.prefs["joined"].pop(cid, {})
+            if ent.get("source") == "config":
+                self.prefs["left"].append(cid)
+            self.prefs["order"] = list(self.colls)
+            if c.store is not None:
+                c.store.db.close()
+            shutil.rmtree(self.dir / "c" / cid, ignore_errors=True)
+            self.save()
+        return {"left": cid}
+
+    def update_joined(self, cid, label=None, muted=None, pinned=None):
+        ent = self.prefs["joined"][cid]
+        if label is not None:
+            lab = re.sub(r"[\x00-\x1f\x7f]", "", str(label)).strip()[:40]
+            ent["label"] = lab or self.colls[cid].name
+        if muted is not None:
+            ent["muted"] = bool(muted)
+        if pinned is not None:
+            ent["pinned"] = bool(pinned)
+        self.save()
+        return self.sidebar()
+
+    def share(self, cid):
+        c = self.colls[cid]
+        if c.kind in ("exit", "card"):
+            raise ValueError("built-in views can't be shared")
+        return {"link": J.make(self._host_of(c.cfg), c.kind, c.name, c.root_pin)}
+
+    def unread(self, cid):
+        c, ent = self.colls[cid], self.prefs["joined"].get(cid, {})
+        if c.store is None or ent.get("muted"):
+            return 0
+        items, _ = self._items(c)
+        mark = ent.get("read_seq", 0)
+        return sum(1 for it in items if it["seq"] > mark and it["author"] != self.me
+                   and not it["t"].endswith(".profile"))
+
+    def mark_read(self, cid):
+        c, ent = self.colls[cid], self.prefs["joined"].get(cid)
+        if ent is not None and c.store is not None:
+            items, _ = self._items(c)
+            new = max([it["seq"] for it in items] + [ent.get("read_seq", 0)])
+            if new != ent.get("read_seq"):
+                ent["read_seq"] = new
+                self.save()
+
+    def sidebar(self):
+        groups = {}
+        for cid, c in self.colls.items():
+            if c.kind == "exit":
+                continue  # Exits is a built-in ribbon item
+            ent = self.prefs["joined"].get(cid, {})
+            groups.setdefault(self._host_of(c.cfg), []).append({
+                "id": cid, "label": ent.get("label") or cid, "name": c.name, "kind": c.kind,
+                "template": KIND_TEMPLATE[c.kind], "unread": self.unread(cid),
+                "muted": bool(ent.get("muted")), "pinned": bool(ent.get("pinned")),
+                "source": ent.get("source", "config"), "error": c.last.get("error"),
+                "root_mismatch": c.last.get("root_mismatch")})
+        out = []
+        for host, items in groups.items():
+            items.sort(key=lambda x: (not x["pinned"], x["label"].lower()))
+            out.append({"host": host, "short": host if len(host) <= 24 else host[:10] + "…" + host[-10:],
+                        "items": items})
+        out.sort(key=lambda g: (not any(i["pinned"] for i in g["items"]), g["host"]))
+        return {"groups": out}
 
     # ---- moderation filter (host-signed records, user override) ----
     def _hidden(self, c):
@@ -165,8 +384,10 @@ class Core:
             out.append(it)
         return out, hidden
 
-    def view(self, name):
+    def view(self, name, read=False):
         c = self.colls[name]
+        if read:
+            self.mark_read(name)
         base = {"collection": name, "kind": c.kind, "me": self.me[:6], "me_key": self.me,
                 "status": c.last, "rules": (c.policy or {}).get("rules", ""),
                 "template": KIND_TEMPLATE[c.kind]}
@@ -629,12 +850,16 @@ def make_handler(core: Core, test_mode=False):
             try:
                 if p == "collections":
                     return self._json(200, {"collections": [
-                        {"name": c.name, "kind": c.kind, "template": KIND_TEMPLATE[c.kind]}
+                        {"name": c.id, "kind": c.kind, "template": KIND_TEMPLATE[c.kind],
+                         "root_mismatch": c.last.get("root_mismatch"),
+                         "label": core.prefs["joined"].get(c.id, {}).get("label") or c.id}
                         for c in core.colls.values()], "me": core.me,
                         "templates": core.templates.status(), "test": test_mode,
                         "outbox": len(core.prefs["outbox"])})
+                if p == "sidebar":
+                    return self._json(200, core.sidebar())
                 if p.startswith("view/"):
-                    return self._json(200, core.view(p[5:]))
+                    return self._json(200, core.view(p[5:], read=q.get("read") == ["1"]))
                 if p.startswith("blob/"):
                     _, name, sha = p.split("/")
                     b = core.blob(name, sha)
@@ -683,6 +908,19 @@ def make_handler(core: Core, test_mode=False):
                     return self._json(200, core.revoke(a["c"], a["id"], a["to"]))
                 if p == "file/request":
                     return self._json(200, core.request_access(a["c"], a["id"], a.get("note", "")))
+                if p == "join/preview":
+                    return self._json(200, core.join_preview(a["link"]))
+                if p == "join":
+                    return self._json(200, core.join(a["link"], a.get("label")))
+                if p == "retrust":
+                    return self._json(200, core.retrust(a["c"], a["root"], a.get("confirm")))
+                if p == "leave":
+                    return self._json(200, core.leave(a["c"]))
+                if p == "coll/update":
+                    return self._json(200, core.update_joined(a["c"], a.get("label"), a.get("muted"),
+                                                              a.get("pinned")))
+                if p == "share":
+                    return self._json(200, core.share(a["c"]))
                 if p == "sync":
                     return self._json(200, core.sync(a.get("c")))
                 if p == "draft":

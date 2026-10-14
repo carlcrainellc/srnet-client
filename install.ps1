@@ -16,6 +16,7 @@ if ($Uninstall) {
   try { if (Test-Path $Prefix) { Remove-Item -Recurse -Force $Prefix } }
   catch { Write-Error "SRNet is still running. Close the SRNet window (and any 'srnet' terminals), then run -Uninstall again." }
   if (Test-Path $Menu) { Remove-Item -Recurse -Force $Menu }
+  if (Test-Path "HKCU:\Software\Classes\srnet") { Remove-Item -Recurse -Force "HKCU:\Software\Classes\srnet" }
   Remove-FromUserPath $Bin
   Write-Host "Removed the SRNet client. Your wallet and settings in $HOME\.srnet were left in place."
   exit 0
@@ -82,6 +83,15 @@ if (-not $NoShortcut) {
   $lnk.WindowStyle = 7
   $lnk.Description = "SNApps, exits and wallet for SRNet"
   $lnk.Save()
+}
+
+if (-not $NoShortcut) {
+  # srnet:// link handler (per user). It only opens the join sheet; joining needs a click.
+  $K = "HKCU:\Software\Classes\srnet"
+  New-Item -Force -Path "$K\shell\open\command" | Out-Null
+  Set-ItemProperty -Path $K -Name "(default)" -Value "URL:SRNet link"
+  Set-ItemProperty -Path $K -Name "URL Protocol" -Value ""
+  Set-ItemProperty -Path "$K\shell\open\command" -Name "(default)" -Value ('"' + (Join-Path $Bin "srnet.cmd") + '" open "%1"')
 }
 
 Write-Host ""

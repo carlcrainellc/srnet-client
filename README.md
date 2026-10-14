@@ -140,3 +140,24 @@ See [SECURITY.md](SECURITY.md).
 ## License
 
 Apache-2.0 for the exits client and contract, MIT for the SNApps client. See [LICENSE](LICENSE).
+
+## Joining collections
+
+The SNApps client starts with Home, Exits and Wallet in the ribbon. Everything else is something you joined:
+
+- **Join**: on Home, paste a `.sesh` address (lists what that host offers) or an invite link
+  `srnet://<name>.sesh/<type>/<collection>#root=<root key>`. The core fetches the host's signed delegation and
+  shows the name, type, host and root key; nothing is saved until you click Join. Links are strictly validated
+  (only `.sesh` hosts, known types, plain names, a 64-hex root).
+- **Sidebar**: joined collections grouped by host, with unread counts. Rename, mute, pin, share and leave from the `⋯`
+  menu. State lives in the client's `prefs.json`; no restart or config edit needed.
+- **Trust on first use**: the root key is pinned the first time you join. If a host later presents a different root
+  key, sync and posting stop and the collection shows ⚠. Re-trust is explicit (type "trust the new key") and wipes
+  that collection's cache.
+- **Share** makes an invite link carrying the pinned root key, so the receiver verifies the same key.
+- **Directories** (`directory` type): hosts list their own collection by signing a `directory.entry` with that
+  collection's root key (`snapps/scripts/directory_entry.py`); entries signed by anyone else are ignored.
+- **Link handler**: `srnet open <link>` opens the join sheet in the running client. `install.sh` registers it for
+  `srnet://` on Linux (xdg), `install.ps1` per-user on Windows (HKCU). macOS needs an app bundle to own a URL scheme,
+  so there run `srnet open '<link>'` by hand.
+- Collections from an existing `client.json` still load, as pre-joined and trusted with their configured pin.

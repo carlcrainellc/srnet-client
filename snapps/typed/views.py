@@ -241,7 +241,27 @@ def drop_view(items, policy, me: str | None = None, my_enc: str | None = None) -
     return {"items": out}
 
 
-VIEWS = {"room": room_view, "wiki": wiki_view, "shop": shop_view, "drop": drop_view,
+def directory_view(items, policy) -> dict:
+    from .joins import LinkError, parse
+    ids = identities(items)
+    entries = {}
+    for it in items:
+        if it.get("t") != "directory.entry":
+            continue
+        b = it["body"]
+        try:
+            l = parse(b["link"])
+        except LinkError:
+            continue
+        if not l.get("root") or it["author"] != l["root"]:
+            continue  # only the collection's own root key can list it (host opt-in)
+        entries[b["link"]] = {"id": it["id"], "link": b["link"], "title": b["title"], "desc": b.get("desc") or "",
+                              "host": l["host"], "kind": l["kind"], "name": l["name"],
+                              "by": label(ids, it["author"]), "ts": it["ts"]}
+    return {"entries": sorted(entries.values(), key=lambda e: e["title"].lower())}
+
+
+VIEWS = {"directory": directory_view, "room": room_view, "wiki": wiki_view, "shop": shop_view, "drop": drop_view,
          "id": lambda items, policy: {}}
 
 
