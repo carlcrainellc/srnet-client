@@ -47,7 +47,7 @@ chmod 755 "$BIN/srnet" "$BIN/srnet-relayer"
 
 if [ "$(uname -s)" = "Linux" ] && [ -d "$HOME/.local/share" ]; then
   mkdir -p "$HOME/.local/share/applications"
-  sed "s#^Exec=.*#Exec=$BIN/srnet ui#" "$SRC/client-cli/srnet-ui.desktop" > "$HOME/.local/share/applications/srnet-ui.desktop" "$HOME/.local/share/applications/srnet-open.desktop"
+  sed "s#^Exec=.*#Exec=$BIN/srnet ui#" "$SRC/client-cli/srnet-ui.desktop" > "$HOME/.local/share/applications/srnet-ui.desktop"
   # srnet:// links open the client's join sheet (nothing joins until you click Join)
   sed "s#^Exec=.*#Exec=$BIN/srnet open %u#" "$SRC/client-cli/srnet-open.desktop" > "$HOME/.local/share/applications/srnet-open.desktop"
   command -v xdg-mime >/dev/null && xdg-mime default srnet-open.desktop x-scheme-handler/srnet || true
