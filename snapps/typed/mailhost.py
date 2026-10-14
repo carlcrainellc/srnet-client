@@ -290,9 +290,12 @@ def main(argv=None):
     ap.add_argument("--bind", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=48915)
     ap.add_argument("--closed", action="store_true", help="no new inbox registrations")
+    ap.add_argument("--delegation", help="root-signed delegation to publish in /v1/mail/info")
     ap.add_argument("--max-inboxes", type=int, default=DEFAULTS["max_inboxes"])
     a = ap.parse_args(argv)
     h = Host(a.data, {"open_registration": not a.closed, "max_inboxes": a.max_inboxes})
+    if a.delegation and os.path.exists(a.delegation):
+        h.delegation = _readjson(a.delegation)
     srv = serve(h, a.bind, a.port)
     print(f"mail host {h.id[:16]}… on http://{a.bind}:{srv.server_address[1]}/", flush=True)
     threading.Event().wait()
