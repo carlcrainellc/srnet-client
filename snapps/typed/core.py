@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import mbfmt as F
-from . import adapters, htmlview, views
+from . import adapters, filecrypt as FC, htmlview, views
 from .record import BOARD, KIND_TYPES, TESTNET_CHAINS, codec_for, make_record
 from .registry import RegistryError, TemplateManager
 from .store import Store
@@ -107,6 +107,8 @@ class Core:
                 f.write(os.urandom(32))
         self.key = F.key_from_seed(kp.read_bytes())
         self.me = F.pub_hex(self.key)
+        self.xkey = FC.x25519_from_seed(kp.read_bytes())  # file-key wrapping; never leaves the core
+        self.enc_pub = FC.pub_hex(self.xkey)
         self.prefs_p = self.dir / "prefs.json"
         self.prefs = {"follows": [], "mutes": [], "moderation": "honour", "revealed": [],
                       "exit_seen": {}, "outbox": []}
@@ -117,6 +119,7 @@ class Core:
         self.colls = {c["name"]: Coll(self, c) for c in config.get("collections", [])}
         self.sites = config.get("html_sites", {})
         self.drafts, self.lock = {}, threading.RLock()
+        self.config, self.pending_pay = config, {}
         self.blob_cache = self.dir / "blobs"
         self.blob_cache.mkdir(exist_ok=True)
 
@@ -192,7 +195,8 @@ class Core:
                             for k, p in ids["profiles"].items()],
                  "rotations": [{"from": k, **r} for k, r in ids["rotations"].items()]}
         else:
-            v = views.VIEWS[c.kind](items, c.policy or {})
+            v = (views.drop_view(items, c.policy or {}, self.me, self.enc_pub) if c.kind == "drop"
+                 else views.VIEWS[c.kind](items, c.policy or {}))
         return dict(base, view=v, hidden=hidden)
 
     # ---- drafts: template proposes, core validates, user confirms, core signs ----
@@ -211,14 +215,14 @@ class Core:
         else:
             spec = KIND_TYPES[c.kind].get(t, 1)
             spec.check_body({k: v for k, v in body.items() if v is not None}, refs)
-            if t == "id.profile" and body.get("next_key_hash") is None:
-                pass
+            if t == "id.profile" and not body.get("enc_key"):
+                body = dict(body, enc_key=self.enc_pub)  # lets others share encrypted files with you
         tok = secrets.token_hex(12)
         with self.lock:
             self.drafts[tok] = {"collection": name, "t": t, "body": body, "refs": refs,
                                 "at": self.clock()}
         prev = {"token": tok, "collection": name, "t": t,
-                "lines": [f"{k}: {v}" for k, v in body.items() if v not in (None, "")],
+                "lines": [_line(k, v) for k, v in body.items() if v not in (None, "")],
                 "refs": refs}
         if self.autoconfirm:
             return dict(prev, result=self.confirm(tok))
@@ -306,6 +310,18 @@ class Core:
                   if x["id"] == listing_id), None)
         if not l or not l["active"]:
             raise F.FormatError("no such active listing")
+        if l.get("currency") == "SRNET":
+            P = _payments()
+            pay = P.Payment("shop", l["vendor_id"], P.usdc(l["price"]), item=l["title"],
+                            seller=l["seller_label"], ref=l["id"])
+            lines = P.describe(pay)
+            tok = secrets.token_hex(12)
+            with self.lock:
+                self.pending_pay[tok] = {"payment": pay, "collection": name, "at": self.clock()}
+            return {"ok": True, "srnet": True, "token": tok, "sheet": {
+                "title": "Pay with SRNet balance", "lines": lines, "item": l["title"],
+                "seller": l["seller_label"], "amount": l["price"], "currency": "USDC (SRNet balance)",
+                "note": "Enter your wallet passphrase to pay. Only this core signs; the store page never sees it."}}
         if l["chain_id"] not in TESTNET_CHAINS:
             raise F.FormatError("mainnet payments are disabled in this build")
         return {"ok": True, "sheet": {
@@ -314,27 +330,195 @@ class Core:
             "item": l["title"], "seller": l["seller_label"], "listing": l["id"],
             "note": "Testnet only. Shown for the user's wallet; this client never sends funds."}}
 
-    # ---- file drop blobs ----
-    def upload(self, name, data: bytes, filename: str, mime: str, note: str = ""):
+    def _pay_chain(self, passphrase: str | None, private_key: str | None = None):
+        P = _payments()
+        from srnet import chain as CH, keys as K
+        cfg = self.config.get("payments") or {}
+        pk = private_key or K.unlock(Path(cfg.get("keystore") or Path.home() / ".srnet" / "keystore.json"),
+                                     passphrase or "")
+        ch = CH.ChainCfg(rpc=cfg.get("rpc") or CH.DEFAULT_RPC, contract=cfg.get("contract") or CH.DEFAULT_CONTRACT,
+                         private_key=pk)
+        if ch.chainid() in CH.MAINNET_CHAINS and not cfg.get("allow_mainnet"):
+            raise F.FormatError("mainnet payments are off; set payments.allow_mainnet in the client config")
+        return P, ch
+
+    def pay_confirm(self, tok, passphrase: str | None = None, private_key: str | None = None):
+        """User confirmed the core's payment sheet: pay from SRNet balance, then post a receipt."""
+        with self.lock:
+            d = self.pending_pay.pop(tok, None)
+        if not d or self.clock() - d["at"] > 600:
+            return {"ok": False, "error": "unknown or expired payment"}
+        try:
+            P, ch = self._pay_chain(passphrase, private_key)
+            r = P.pay(ch, d["payment"])
+        except Exception as e:  # chain / keystore errors go back to the sheet
+            return {"ok": False, "error": str(e)[:300]}
+        rec = self._sign_submit({"collection": d["collection"], "t": "shop.order",
+                                 "body": {"lease_id": r["lease_id"], "buyer": r["buyer"], "note": None},
+                                 "refs": [d["payment"].ref]})
+        return dict(r, receipt_posted=bool(rec.get("ok")))
+
+    def verify_order(self, name, order_id):
+        """Seller: check a shop.order on-chain (read-only)."""
         c = self.colls[name]
-        if c.kind != "drop":
-            raise F.FormatError("not a drop")
+        for l in views.shop_view(self._items(c)[0], c.policy or {})["listings"]:
+            for o in l["orders"]:
+                if o["id"] == order_id:
+                    P = _payments()
+                    from srnet import chain as CH
+                    cfg = self.config.get("payments") or {}
+                    ch = CH.read_only(cfg.get("rpc") or CH.DEFAULT_RPC, cfg.get("contract") or CH.DEFAULT_CONTRACT)
+                    return {"ok": True, "paid": P.verify(ch, o["lease_id"], l["vendor_id"], P.usdc(l["price"]),
+                                                         o["buyer"])}
+        raise F.FormatError("no such order")
+
+    # ---- file drop: encrypted by default; the host only ever sees ciphertext ----
+    def _put_blob(self, c, data: bytes) -> bool:
         h = hashlib.sha256(data).hexdigest()
-        ok = False
         for host in c.hosts:
             try:
                 req = urllib.request.Request(host + "/v1/blob", data=data,
                                              headers={"Content-Type": "application/octet-stream"})
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    ok = json.loads(r.read()).get("sha256") == h
-                if ok:
-                    break
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    if json.loads(r.read()).get("sha256") == h:
+                        return True
             except OSError:
                 continue
-        if not ok:
+        return False
+
+    def _drop(self, name):
+        c = self.colls[name]
+        if c.kind != "drop":
+            raise F.FormatError("not a drop")
+        return c
+
+    def _enc_key_of(self, c, who: str) -> str:
+        """A recipient given as an X25519 enc key, or as an author key whose profile lists one."""
+        if not re.fullmatch(r"[0-9a-f]{64}", who or ""):
+            raise F.FormatError("recipient must be a 64-hex key")
+        items, _ = self._items(c)
+        prof = views.identities(items)["profiles"].get(who)
+        if prof and prof.get("enc_key"):
+            return prof["enc_key"]
+        return who  # taken as an enc key
+
+    def upload(self, name, data: bytes, filename: str, mime: str, note: str = "",
+               mode: str = "gated", recipients=(), prev: str | None = None):
+        c = self._drop(name)
+        if mode not in ("gated", "link", "plain"):
+            raise F.FormatError("mode must be gated, link or plain")
+        if mode == "plain":
+            if not self._put_blob(c, data):
+                return {"ok": False, "error": "no host took the blob"}
+            body = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "mime": mime,
+                    "name": filename, "note": note or None, "mode": "plain"}
+            return self.draft(name, "drop.item", body, [prev] if prev else [])
+        blob, key = FC.encrypt(data, filename, mime)
+        sha = hashlib.sha256(blob).hexdigest()
+        to = [self.enc_pub] + [k for k in (self._enc_key_of(c, r) for r in recipients) if k != self.enc_pub]
+        wraps = [FC.wrap(key, k, sha) for k in dict.fromkeys(to)]
+        if not self._put_blob(c, blob):
             return {"ok": False, "error": "no host took the blob"}
-        return self.draft(name, "drop.item", {"sha256": h, "size": len(data), "mime": mime,
-                                              "name": filename, "note": note or None}, [])
+        (self.blob_cache / sha).write_bytes(blob)
+        body = {"sha256": sha, "size": len(blob), "note": note or None, "mode": mode, "wraps": wraps}
+        return self.draft(name, "drop.item", body, [prev] if prev else [])
+
+    def _state(self, name, fid):
+        c = self._drop(name)
+        st = views.drop_state(self._items(c)[0]).get(fid)
+        if not st:
+            raise F.FormatError("no such file")
+        return c, st
+
+    def _file_key(self, st) -> bytes:
+        w = st["wraps"].get(self.enc_pub)
+        if not w:
+            raise F.FormatError("you don't have access to this file; request it")
+        return FC.unwrap(w, self.xkey, st["item"]["body"]["sha256"])
+
+    def open_file(self, name, fid):
+        """Fetch, verify by hash and (if encrypted) decrypt. Returns (bytes, filename, mime)."""
+        c, st = self._state(name, fid)
+        b = st["item"]["body"]
+        blob = self.blob(name, b["sha256"])
+        if blob is None:
+            raise F.FormatError("blob unavailable")
+        if st["mode"] == "plain":
+            return blob, b.get("name") or "file", b.get("mime") or "application/octet-stream"
+        try:
+            data, meta = FC.decrypt(blob, self._file_key(st))
+        except FC.CryptoError as e:
+            raise F.FormatError(str(e))
+        return data, meta["name"], meta["mime"]
+
+    def share_link(self, name, fid):
+        c, st = self._state(name, fid)
+        if st["mode"] != "link":
+            raise F.FormatError("only public-link files have a link")
+        return {"ok": True, "link": FC.link(c.hosts[0], st["item"]["body"]["sha256"], self._file_key(st)),
+                "note": "Anyone with this link can open the file. The key is after '#', so the host never sees it."}
+
+    def open_link(self, url: str):
+        try:
+            base, sha, key = FC.parse_link(url)
+            u = urlparse(base)
+            if u.scheme not in ("http", "https"):
+                raise FC.CryptoError("bad link")
+            blob = urllib.request.urlopen(base, timeout=30).read(FC.max_cipher_len() + 1)  # fragment stripped
+            if hashlib.sha256(blob).hexdigest() != sha:
+                raise FC.CryptoError("file does not match its hash")
+            data, meta = FC.decrypt(blob, key)
+        except (FC.CryptoError, ValueError) as e:
+            raise F.FormatError(str(e))
+        return data, meta["name"], meta["mime"]
+
+    def access(self, name, fid):
+        """Owner's access sheet: who can open the file (labels + enc key), pending requests."""
+        c, st = self._state(name, fid)
+        if st["owner"] != self.me:
+            raise F.FormatError("only the owner manages access")
+        return {"ok": True, "mode": st["mode"],
+                "recipients": [k for k in st["wraps"] if k != self.enc_pub],
+                "revoked": sorted(st["revoked"]),
+                "requests": [{"id": r["id"], "from": r["author"], "enc_key": r["enc_key"], "note": r["note"]}
+                             for r in st["requests"] if r["enc_key"] not in st["wraps"]],
+                "note": "Revoking stops future versions from being shared with that key. "
+                        "It can't take back a copy that was already downloaded."}
+
+    def grant(self, name, fid, who):
+        c, st = self._state(name, fid)
+        if st["owner"] != self.me:
+            raise F.FormatError("only the owner can grant access")
+        if st["mode"] == "plain":
+            raise F.FormatError("plain files are public already")
+        to = self._enc_key_of(c, who)
+        sha = st["item"]["body"]["sha256"]
+        return self.draft(name, "drop.grant", {"sha256": sha, "wrap": FC.wrap(self._file_key(st), to, sha)}, [fid])
+
+    def approve(self, name, request_id):
+        items, _ = self._items(self._drop(name))
+        r = next((it for it in items if it["id"] == request_id and it["t"] == "drop.request"), None)
+        if not r:
+            raise F.FormatError("no such request")
+        return self.grant(name, r["refs"][0], r["body"]["enc_key"])
+
+    def revoke(self, name, fid, enc_key):
+        c, st = self._state(name, fid)
+        if st["owner"] != self.me:
+            raise F.FormatError("only the owner can revoke")
+        return self.draft(name, "drop.revoke", {"to": enc_key}, [fid])
+
+    def request_access(self, name, fid, note=""):
+        self._state(name, fid)
+        return self.draft(name, "drop.request", {"enc_key": self.enc_pub, "note": note or None}, [fid])
+
+    def new_version(self, name, fid, data: bytes, filename: str, mime: str, note: str = ""):
+        """Re-encrypt with a fresh key; shared with current recipients minus revoked ones."""
+        c, st = self._state(name, fid)
+        if st["owner"] != self.me:
+            raise F.FormatError("only the owner can publish a new version")
+        keep = [k for k in st["wraps"] if k not in st["revoked"] and k != self.enc_pub]
+        return self.upload(name, data, filename, mime, note, mode=st["mode"], recipients=keep, prev=fid)
 
     def blob(self, name, sha):
         if not re.fullmatch(r"[0-9a-f]{64}", sha):
@@ -344,7 +528,7 @@ class Core:
             return p.read_bytes()
         for host in self.colls[name].hosts:
             try:
-                b = urllib.request.urlopen(f"{host}/v1/blob/{sha}", timeout=15).read(3 << 20)
+                b = urllib.request.urlopen(f"{host}/v1/blob/{sha}", timeout=30).read(FC.max_cipher_len() + 1)
             except OSError:
                 continue
             if hashlib.sha256(b).hexdigest() == sha:  # fetched by hash and checked
@@ -467,15 +651,38 @@ def make_handler(core: Core, test_mode=False):
             if not u.path.startswith("/api/") or not self._api_ok():
                 return self._json(403, {"error": "core API: trusted shell only"})
             n = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(min(n, 3 << 20))
+            raw = self.rfile.read(min(n, FC.MAX_PLAIN + (64 << 10)))
             p = u.path[5:]
             try:
                 if p == "upload":
                     q = parse_qs(u.query)
-                    return self._json(200, core.upload(q["c"][0], raw, q.get("name", ["file"])[0][:128],
-                                                       q.get("mime", ["application/octet-stream"])[0],
-                                                       q.get("note", [""])[0]))
+                    rec = [r for r in q.get("to", [""])[0].replace(",", " ").split() if r]
+                    args = (q["c"][0], raw, q.get("name", ["file"])[0][:128],
+                            q.get("mime", ["application/octet-stream"])[0], q.get("note", [""])[0])
+                    if q.get("prev"):
+                        return self._json(200, core.new_version(args[0], q["prev"][0], *args[1:]))
+                    return self._json(200, core.upload(*args, mode=q.get("mode", ["gated"])[0],
+                                                       recipients=rec))
                 a = json.loads(raw or b"{}")
+                if p in ("file/open", "file/openlink"):
+                    data, fname, mime = (core.open_file(a["c"], a["id"]) if p == "file/open"
+                                         else core.open_link(a["link"]))
+                    safe = re.sub(r"[^A-Za-z0-9._ -]", "_", fname)[:100] or "file"
+                    return self._send(200, data, "application/octet-stream", "default-src 'none'; sandbox",
+                                      [("Content-Disposition", f'attachment; filename="{safe}"'),
+                                       ("X-File-Mime", re.sub(r"[^a-z0-9/.+-]", "", mime)[:80])])
+                if p == "file/link":
+                    return self._json(200, core.share_link(a["c"], a["id"]))
+                if p == "file/access":
+                    return self._json(200, core.access(a["c"], a["id"]))
+                if p == "file/grant":
+                    return self._json(200, core.grant(a["c"], a["id"], a["to"]))
+                if p == "file/approve":
+                    return self._json(200, core.approve(a["c"], a["request"]))
+                if p == "file/revoke":
+                    return self._json(200, core.revoke(a["c"], a["id"], a["to"]))
+                if p == "file/request":
+                    return self._json(200, core.request_access(a["c"], a["id"], a.get("note", "")))
                 if p == "sync":
                     return self._json(200, core.sync(a.get("c")))
                 if p == "draft":
@@ -497,6 +704,10 @@ def make_handler(core: Core, test_mode=False):
                     return self._json(200, {"ok": True})
                 if p == "pay":
                     return self._json(200, core.pay_draft(a["c"], a["listing"]))
+                if p == "pay/confirm":
+                    return self._json(200, core.pay_confirm(a["token"], a.get("passphrase")))
+                if p == "pay/verify":
+                    return self._json(200, core.verify_order(a["c"], a["order"]))
                 if p == "registry/offer":
                     files = {k: base64.b64decode(v) for k, v in a["files"].items()}
                     return self._json(200, core.templates.offer(a["entry"], files))
@@ -524,6 +735,24 @@ def serve(core, port=0, test_mode=False, sync_every=2.0):
                     pass
         threading.Thread(target=loop, daemon=True).start()
     return srv
+
+
+def _payments():
+    """The shared SRNet payments module from the client (client-cli/srnet/payments.py)."""
+    import sys
+    d = os.environ.get("SRNET_CLIENT_DIR") or str(HERE.parents[1] / "client-cli")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    from srnet import payments
+    return payments
+
+
+def _line(k, v):
+    if k == "wraps":
+        return f"shared with: {len(v)} key(s) (you included)"
+    if k == "wrap":
+        return f"grant to: {v['to'][:16]}…"
+    return f"{k}: {v}"
 
 
 def main():

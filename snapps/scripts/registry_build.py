@@ -1,6 +1,6 @@
 """Sign the bundled templates into typed/templates/registry.json (dev registry key).
 
-The dev registry key lives OUTSIDE the repo (default /workspace/srnet-msgboard-keys/registry.key,
+The dev registry key lives OUTSIDE the repo (default $SRNET_REGISTRY_KEY or ~/.srnet-dev-keys/registry.key,
 mode 600).  In production the registry root is offline and split; this script is
 the stand-in.  Usage: python3 scripts/registry_build.py [--key PATH] [--ver 1.0.0]"""
 import argparse, json, os, shutil, subprocess, sys
@@ -13,11 +13,12 @@ from typed.registry import read_dir, sign_entry
 TYPES = {"board": ["board.post@1", "mod.hide@1"], "room": ["room.msg@1", "room.topic@1", "room.join@1"],
          "wiki": ["wiki.page@1", "wiki.rev@1", "wiki.revert@1", "wiki.protect@1"],
          "profile": ["id.profile@1", "id.rotate@1", "id.link@1"],
-         "shop": ["shop.listing@1", "shop.withdraw@1", "shop.review@1"], "drop": ["drop.item@1"],
+         "shop": ["shop.listing@1", "shop.withdraw@1", "shop.review@1", "shop.order@1"],
+         "drop": ["drop.item@1", "drop.grant@1", "drop.revoke@1", "drop.request@1"],
          "exit": ["exit.listing@v2-legacy"], "card": ["snapp.card@legacy"]}
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--key", default="/workspace/srnet-msgboard-keys/registry.key")
+ap.add_argument("--key", default=os.environ.get("SRNET_REGISTRY_KEY") or os.path.expanduser("~/.srnet-dev-keys/registry.key"))
 ap.add_argument("--ver", default="1.0.0")
 a = ap.parse_args()
 kp = Path(a.key)

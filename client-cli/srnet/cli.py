@@ -10,6 +10,9 @@
   srnet status
   srnet disconnect         unmap, and stop auto-renew
   srnet topup --amount N   phone-wallet top-up: QR, plain USDC send, gasless deposit
+  srnet deliver            resend your last claim to the seller (buy does this automatically)
+  srnet pay --vendor-id V --amount N  pay any SRNet seller from your SRNet balance
+  srnet vendor --shop-key K  seller: bind a vendor id for SRNet-balance payments
   srnet snapps --config F  typed SNApps client (boards, rooms, wiki, shop, drop, pages)
   srnet ui                 open the local web page (SNApps, Exits, Wallet / Top up)
 
@@ -148,7 +151,9 @@ def cmd_buy(args, st: state.State) -> int:
             # Enough for this lease plus one renewal after the deposit fee.
             bps = ch.fee_bps()
             ch.fund(-(-amount * 2 * 10_000 // (10_000 - bps)))
-        hold_id = ch.start_lease(L["vendor_id"], rate, hours)
+        from . import payments
+        hold_id = payments.pay(ch, payments.Payment("exit", L["vendor_id"], rate, item="exit time",
+                                                    seller=L["seller"], hours=hours))["lease_id"]
         user = ch.address()
     # Sign + drop claim for seller watcher
     from watcher import claim_message
@@ -159,11 +164,19 @@ def cmd_buy(args, st: state.State) -> int:
     spool.mkdir(parents=True, exist_ok=True)
     claim_path = spool / f"hold-{hold_id}.json"
     claim_path.write_text(json.dumps(claim, indent=2))
+    delivery = None
+    if not args.no_deliver and not args.mock:
+        from . import deliver as D
+        delivery = D.deliver(claim, L, dns=cfg.get("sesh_dns"), wait_admit=60,
+                             attempts=6)
+        print(f"claim delivery to seller: {delivery['status']}"
+              + (f" ({delivery['reason']})" if delivery.get("reason") else ""), file=sys.stderr)
     st.data["pending_buy"] = {
         "seller": args.seller, "hold_id": hold_id, "contract": L["contract"].lower(),
         "chainid": cid, "vendor_id": L["vendor_id"], "amount": amount, "user": user,
         "rate_per_hour": rate, "hours": hours,
-        "claim_path": str(claim_path),
+        "claim_path": str(claim_path), "delivery": delivery,
+        "listing": {k: L.get(k) for k in ("seller", "claim_port")},
     }
     st.data["lease"] = {"seller": args.seller, "contract": L["contract"].lower(), "chainid": cid,
                         "current": hold_id, "renewed_from": [], "auto_renew": not args.no_auto_renew,
@@ -171,8 +184,23 @@ def cmd_buy(args, st: state.State) -> int:
     st.save()
     print(json.dumps({"ok": True, "hold_id": hold_id, "lease_id": hold_id, "rate_per_hour": rate, "hours": hours,
                       "amount": amount, "claim": str(claim_path), "seller": args.seller,
-                      "final": True, "auto_renew": not args.no_auto_renew}))
+                      "final": True, "auto_renew": not args.no_auto_renew, "delivery": delivery}))
     return 0
+
+
+def cmd_deliver(args, st: state.State) -> int:
+    """Retry delivering the last claim to the seller (safe to repeat; the seller deduplicates)."""
+    from . import deliver as D
+    pb = st.data.get("pending_buy") or {}
+    if not pb.get("claim_path") or not Path(pb["claim_path"]).exists():
+        print("no claim to deliver; run srnet buy first", file=sys.stderr)
+        return 1
+    claim = json.loads(Path(pb["claim_path"]).read_text())
+    r = D.deliver(claim, pb.get("listing") or {"seller": pb["seller"]}, dns=_cfg(st).get("sesh_dns"))
+    pb["delivery"] = r
+    st.save()
+    print(json.dumps(r))
+    return 0 if r["delivered"] and r["status"] in ("queued", "admitted") else 1
 
 
 _MISSING_CFG = ("need a wallet: create a "
@@ -527,6 +555,55 @@ def cmd_topup(args, st: state.State) -> int:
     return 0
 
 
+def cmd_pay(args, st: state.State) -> int:
+    """Pay any SRNet seller from your SRNet balance (store items, paid files, rooms)."""
+    from . import payments
+    cfg = _cfg(st)
+    p = payments.Payment(args.purpose, args.vendor_id, payments.usdc(args.amount), item=args.item or "")
+    try:
+        lines = payments.describe(p)
+    except payments.PaymentError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    if not args.yes and input("Pay now? [y/N] ").strip().lower() != "y":
+        print("cancelled", file=sys.stderr)
+        return 1
+    rpc_url = args.rpc or cfg.get("rpc") or os.environ.get("SRNET_RPC") or chain.DEFAULT_RPC
+    pk, _ = keys.resolve(args, cfg, st.root)
+    if not pk:
+        print(_MISSING_CFG, file=sys.stderr)
+        return 2
+    ch = chain.ChainCfg(rpc=rpc_url, contract=args.contract or cfg.get("contract") or chain.DEFAULT_CONTRACT,
+                        private_key=pk)
+    print(json.dumps(payments.pay(ch, p)))
+    return 0
+
+
+def cmd_vendor(args, st: state.State) -> int:
+    """Seller: bind a vendor id to your wallet (once) so buyers can pay you from SRNet balance."""
+    from . import payments
+    cfg = _cfg(st)
+    rpc_url = args.rpc or cfg.get("rpc") or os.environ.get("SRNET_RPC") or chain.DEFAULT_RPC
+    pk, _ = keys.resolve(args, cfg, st.root)
+    if not pk:
+        print(_MISSING_CFG, file=sys.stderr)
+        return 2
+    ch = chain.ChainCfg(rpc=rpc_url, contract=args.contract or cfg.get("contract") or chain.DEFAULT_CONTRACT,
+                        private_key=pk)
+    salt = payments.shop_salt(args.shop_key) if args.shop_key else (args.salt or "0x" + os.urandom(32).hex())
+    vid = payments.vendor_id_for(ch.address(), salt)
+    print(json.dumps({"vendor_id": vid, "salt": salt, "wallet": ch.address()}))
+    if args.dry_run:
+        return 0
+    if ch.chainid() in chain.MAINNET_CHAINS and not args.yes:
+        if input("This sends a transaction on Arbitrum One. Continue? [y/N] ").strip().lower() != "y":
+            return 1
+    ch._send("configureVendor(bytes32,bytes32)", vid, salt)
+    print("vendor configured; put this vendor_id in your listings", file=sys.stderr)
+    return 0
+
+
 def cmd_snapps(args, st: state.State) -> int:
     """Start the typed-SNApp client (signed records, sandboxed templates, no-script HTML viewer)."""
     root = Path(os.environ.get("SRNET_SNAPPS_DIR") or Path(__file__).resolve().parents[2] / "snapps")
@@ -574,6 +651,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("buy", help="prepay hour(s) at the listed rate; FINAL, no refund")
     b.add_argument("seller")
     b.add_argument("--listings", help="offline: listings file instead of the board")
+    b.add_argument("--no-deliver", action="store_true", help="only write the claim to the local spool")
     b.add_argument("--client-sesh", required=True, help="your own .sesh address (goes in the claim)")
     b.add_argument("--rpc", help="JSON-RPC URL (default $SRNET_RPC, else Arbitrum One public RPC)")
     b.add_argument("--private-key", help="plaintext wallet key (discouraged; use srnet key import)")
@@ -627,6 +705,23 @@ def main(argv=None) -> int:
     t.add_argument("--rpc")
     t.add_argument("--private-key")
 
+    sub.add_parser("deliver", help="retry sending your last claim to the seller over Session Router")
+
+    py = sub.add_parser("pay", help="pay a seller from your SRNet balance (asks to confirm)")
+    py.add_argument("--vendor-id", required=True)
+    py.add_argument("--amount", required=True, help="USDC, e.g. 2.50 (max 20 per payment)")
+    py.add_argument("--purpose", default="shop", choices=["shop", "file", "room", "exit"])
+    py.add_argument("--item", help="what you're buying (shown in the prompt)")
+    py.add_argument("--yes", action="store_true", help="skip the confirm prompt")
+    py.add_argument("--contract"); py.add_argument("--rpc"); py.add_argument("--private-key")
+
+    vd = sub.add_parser("vendor", help="seller: bind a vendor id to your wallet for SRNet-balance payments")
+    vd.add_argument("--shop-key", help="your store seller key (64 hex); derives the salt")
+    vd.add_argument("--salt", help="32-byte hex salt (default random)")
+    vd.add_argument("--dry-run", action="store_true", help="print the vendor id only")
+    vd.add_argument("--yes", action="store_true")
+    vd.add_argument("--contract"); vd.add_argument("--rpc"); vd.add_argument("--private-key")
+
     sn = sub.add_parser("snapps", help="start the typed-SNApp client on 127.0.0.1")
     sn.add_argument("--config", required=True, help="client.json: pinned collections and template registry")
     sn.add_argument("--data", help="data dir (default <home>/snapps)")
@@ -651,6 +746,9 @@ def main(argv=None) -> int:
         "ui": cmd_ui,
         "topup": cmd_topup,
         "snapps": cmd_snapps,
+        "pay": cmd_pay,
+        "deliver": cmd_deliver,
+        "vendor": cmd_vendor,
     }
     try:
         return cmds[args.cmd](args, st)

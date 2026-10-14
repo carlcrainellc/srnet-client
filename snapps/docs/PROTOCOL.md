@@ -35,3 +35,67 @@ Mirrors serve the same GET API with the primary's own signed checkpoint and dele
 - New keys (first post < `new_key_age_s`) need `new_key_pow_bits` and obey `new_key_rate`.
 
 ## Typed platform
+
+## Encrypted file drops (`drop.*`)
+
+Files are encrypted on the uploader's computer by default. The host stores and serves only
+ciphertext, addressed by its SHA-256.
+
+**Ciphertext format `srf1`.** `"SRF1" | u32 padded_len` header, then the padded plaintext in
+64 KiB chunks, each sealed with ChaCha20-Poly1305 under a fresh random 32-byte key per file
+(per version). Chunk nonce = 11-byte big-endian chunk index + 1 byte (`1` on the last chunk),
+AAD = the 8-byte header, so chunks can't be reordered, dropped, truncated or extended.
+Plaintext = `u32 meta_len | meta | file | zero padding`, `meta = {"name","mime","size"}`, padded
+to the next power of two (at least 4 KiB). The host learns only the size bucket. Max file 4 MiB.
+
+**Encryption keys.** Each client derives an X25519 key from its author seed
+(HKDF-SHA256, info `srnet-typed/x25519/v1`) and publishes the public half as `enc_key` in its
+`id.profile`. A key wrap is `{"to": enc_key, "epk": ephemeral X25519, "ct": sealed file key}`:
+ECDH(epk, to) → HKDF-SHA256 (info `srnet-typed/file-wrap/v1` ‖ epk ‖ to) → ChaCha20-Poly1305
+(zero nonce, single-use key) with AAD = ciphertext SHA-256 ‖ to. A wrap can't be moved to
+another file or recipient.
+
+**Records** (all in a `drop` collection):
+
+| type | body | refs | rule |
+|---|---|---|---|
+| `drop.item@1` | `sha256, size, mode, wraps?, note?` (+ `name, mime` only when `mode=plain`) | `[previous version]?` | `mode` absent = `plain` (older records keep verifying) |
+| `drop.grant@1` | `sha256, wrap` | `[item]` | counts only if signed by the item's author and `sha256` matches |
+| `drop.revoke@1` | `to` | `[item]` | item author only |
+| `drop.request@1` | `enc_key, note?` | `[item]` | anyone |
+
+**Modes.**
+- `gated` (default): the file key is wrapped to the owner and to each chosen recipient.
+  Recipients can be named by enc key or by author key (resolved through their profile's
+  `enc_key`). The owner can add people later with `drop.grant`, or approve a `drop.request`,
+  which makes the owner's client wrap the key to the requester.
+- `link`: also wrapped to the owner; the owner's client can produce
+  `http://<host .sesh>/v1/blob/<sha256>#k=<base64url key>`. The key is in the URL fragment,
+  which browsers and this client never send to the host.
+- `plain`: explicit opt-in for public, indexable content. Not encrypted; `name`/`mime` in clear.
+
+**Revocation is forward-only.** `drop.revoke` stops the owner's client from wrapping *new
+versions* (a `drop.item` whose `refs[0]` is the previous version, encrypted under a new key) to
+that recipient. It can't take back a file someone already downloaded, or a key they already
+unwrapped.
+
+Templates never see keys, wraps or links: the core strips them from views, decrypts files
+itself, and shows links and access lists only in its own trusted sheets.
+
+## Payments: SRNet balance (`shop.*`)
+
+Every paid action across SRNet (exits, store items, and later paid files and rooms) uses one
+flow: the core or CLI shows its own confirm prompt, then calls
+`SRNetBalance.startLease(vendor_id, price, 1)` on the live contract. One prepaid hour begins at
+once, so the seller can claim the whole amount immediately and the payment is final. The 3%
+fee was taken when the buyer topped up; nothing more is charged. Each payment is capped at
+20 USDC (the contract's `maxPerLease`).
+
+- `shop.listing@1`: `currency` is `SRNET` (default) with `vendor_id` (bytes32) and `price`
+  (USDC, at most 6 decimals, > 0 and ≤ 20). The legacy `ETH`/`USDC` direct form
+  (`chain_id`, `pay_to`) is testnet-only.
+- `shop.order@1`: `{lease_id, buyer, note?}`, refs `[listing]`. The buyer's receipt; the seller's
+  client checks it on-chain (`leaseInfo`/`leaseExtra`: vendor id, amount, buyer) before shipping.
+- Sellers bind a vendor id once with `configureVendor(vendorId, salt)`; `srnet vendor --shop-key K`
+  derives `salt = keccak("srnet-shop/v1" ‖ seller key)`. The seller's signature on the listing ties
+  the store key to that vendor id.

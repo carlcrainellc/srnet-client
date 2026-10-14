@@ -183,7 +183,7 @@ class Platform(unittest.TestCase):
     # ---- drop ----
     def test_file_drop_hash_checked(self):
         data = b"hello file drop\n" * 10
-        d = self.c.upload("files", data, "hello.txt", "text/plain", "a note")
+        d = self.c.upload("files", data, "hello.txt", "text/plain", "a note", mode="plain")
         self.assertTrue(d["result"]["ok"])
         self.b.sync("files")
         it = self.b.view("files")["view"]["items"][-1]

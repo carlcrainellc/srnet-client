@@ -10,6 +10,10 @@ One app for SRNet: typed SNApps, the exit marketplace, and your SRNet balance.
   connect. The board is fetched from three `.sesh` names with failover and a verified cache.
 - **Wallet / Top up.** Fund your SRNet balance from any phone wallet with a plain USDC send.
   No ETH needed.
+- **One way to pay.** Exits, store items and future paid SNApps all use *Pay with SRNet
+  balance*, confirmed in the app's own prompt.
+- **Private files.** File drops are encrypted on your computer before upload. Share with chosen
+  people, with anyone who has the link, or publish unencrypted if you choose.
 
 ## Install
 
@@ -31,9 +35,16 @@ keeps your wallet in `~/.srnet`.
 Routing your traffic through an exit (`srnet connect`) uses nftables and is Linux-only.
 Browsing SNApps, listing exits, buying leases and topping up work on macOS too.
 
-**Windows:** not packaged yet. Under WSL2 (Ubuntu) `./install.sh` works as on Linux. Natively,
-`pip install ./client-cli[qr]` and `python -m srnet ui` should give you exits, wallet and top-up (untested on Windows so far);
-`connect` is not available on Windows.
+**Windows:** install Python 3.10+ (python.org or `winget install Python.Python.3.12`), then in
+PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+It installs under `%LOCALAPPDATA%\srnet-client`, adds `srnet` to your PATH and an **SRNet** entry
+to the Start menu. `-Uninstall` removes it. `srnet ui` and `srnet snapps` work on Windows;
+`connect` is Linux-only.
 
 ## The app
 
@@ -56,6 +67,9 @@ srnet buy <seller>               prepay one hour (--hours N for more)
 srnet renew --loop               buy the next hour near the end of the current one
 srnet connect <seller>           route traffic through the exit (Linux)
 srnet topup --amount N           phone-wallet top-up
+srnet pay --vendor-id V --amount N   pay any SRNet seller from your balance
+srnet vendor --shop-key K        seller: set up SRNet-balance payments
+srnet deliver                    resend your exit claim to the seller
 srnet status | stop | disconnect
 srnet snapps --config F          the SNApps window
 srnet key new|import|show        your encrypted wallet
@@ -63,6 +77,19 @@ srnet doctor                     check setup
 ```
 
 Details: [client-cli/README.md](client-cli/README.md).
+
+## Files
+
+Uploads are encrypted by default (ChaCha20-Poly1305, a new random key per file, sizes padded to
+buckets, name and type sealed inside). The host stores only ciphertext. Choose per file:
+
+- **Only me and people I choose** (default): the file key is sealed to each person's key from
+  their SRNet profile. Add people later, or approve someone's access request.
+- **Anyone with the link**: the key rides in the link after `#`, so the host never sees it.
+- **Not encrypted**: for content meant to be public and indexable.
+
+Revoking someone stops them getting future versions. It can't take back a copy they already
+downloaded.
 
 ## Paying
 
@@ -76,6 +103,12 @@ The contract is unaudited; keep amounts small.
   than you signed.
 - Leases are prepaid whole hours, at most $20 per lease. Payment is final once a lease starts.
   Buying one hour at a time keeps the most you can lose to about one hour.
+- Store items are paid the same way: one payment from your SRNet balance to the seller, at most
+  $20, no extra fee, final. Sellers run `srnet vendor --shop-key <key>` once and put the vendor id
+  in their listings. Store payments from the SNApps window stay off on mainnet until you set
+  `"payments": {"allow_mainnet": true}` in `client.json`.
+- After you buy exit time, the client sends your signed claim straight to the seller over
+  Session Router and waits for the seller's acknowledgment. `srnet deliver` resends it.
 
 No public relayer is configured by default. Set one in the Wallet tab, with
 `srnet topup --relayer URL`, or run your own with `srnet-relayer`.
@@ -97,8 +130,7 @@ copy, and does a full phone-wallet top-up on a local anvil chain. It uses throwa
 
 ## Known gaps
 
-- Getting a buyer's signed claim to a remote seller isn't automatic yet; `buy` writes it to a
-  local spool directory.
+- Claim delivery needs sellers running the updated seller pack (`watcher --claim-listen`).
 - SNApp card verification is optional and not bundled; card views report that.
 
 ## Security

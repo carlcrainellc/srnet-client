@@ -263,29 +263,92 @@ WIKI_PROTECT = TypeSpec("wiki.protect", 1, {"slug": SLUG, "on": boolean()}, 0)
 ID_PROFILE = TypeSpec("id.profile", 1, {"name": text(32, multiline=False),
                                         "bio": text(280, required=False),
                                         "avatar_sha256": hexhash(),
-                                        "next_key_hash": hexhash()}, max_refs=0, pow_extra=2)
+                                        "next_key_hash": hexhash(),
+                                        "enc_key": keyhex(required=False)}, max_refs=0, pow_extra=2)
 ID_ROTATE = TypeSpec("id.rotate", 1, {"old_key": keyhex(), "new_key": keyhex(nullable=True),
                                       "reason": text(120, required=False, multiline=False)}, 0)
 ID_LINK = TypeSpec("id.link", 1, {"other_key": keyhex()}, 0)
+# Default currency is SRNET: paid from the buyer's SRNet balance to `vendor_id` (one prepaid
+# hour on SRNetBalance, max 20 USDC). ETH/USDC direct (chain_id + pay_to) stays readable as a
+# legacy, testnet-only option.
 SHOP_LISTING = TypeSpec("shop.listing", 1, {
     "title": text(80, multiline=False), "desc": text(2000, required=False),
     "price": pattern(r"(0|[1-9][0-9]{0,11})(\.[0-9]{1,18})?", what="price"),
-    "currency": pattern(r"ETH|USDC", what="currency"),
-    "chain_id": integer(1, 2**31), "pay_to": pattern(r"0x[0-9a-fA-F]{40}", what="address")}, 0)
+    "currency": pattern(r"SRNET|ETH|USDC", what="currency"),
+    "vendor_id": pattern(r"0x[0-9a-fA-F]{64}", required=False, what="vendor id"),
+    "chain_id": integer(1, 2**31, required=False),
+    "pay_to": pattern(r"0x[0-9a-fA-F]{40}", required=False, what="address")}, 0)
+SRNET_MAX_PRICE = 20
+
+
+def shop_listing_error(b: dict) -> str | None:
+    if b.get("currency") == "SRNET":
+        if not b.get("vendor_id"):
+            return "SRNET listings need a vendor_id"
+        if b.get("chain_id") or b.get("pay_to"):
+            return "SRNET listings take no chain_id/pay_to"
+        whole, _, frac = b["price"].partition(".")
+        if len(frac) > 6 or float(b["price"]) <= 0 or float(b["price"]) > SRNET_MAX_PRICE:
+            return f"SRNET price must be > 0 and at most {SRNET_MAX_PRICE} USDC, 6 decimals max"
+        return None
+    if not b.get("chain_id") or not b.get("pay_to"):
+        return "ETH/USDC listings need chain_id and pay_to"
+    return None
+
+
+# Buyer's receipt after paying from SRNet balance; the seller checks it on-chain (read-only).
+SHOP_ORDER = TypeSpec("shop.order", 1, {"lease_id": integer(1, 2**63),
+                                        "buyer": pattern(r"0x[0-9a-fA-F]{40}", what="address"),
+                                        "note": text(200, required=False)}, 1)
 SHOP_WITHDRAW = TypeSpec("shop.withdraw", 1, {"reason": text(200, required=False)}, 1)
 SHOP_REVIEW = TypeSpec("shop.review", 1, {"rating": integer(1, 5),
                                           "text": text(500, required=False)}, 1)
+def wrap_obj():
+    def chk(v):
+        if not isinstance(v, dict) or set(v) != {"to", "epk", "ct"}:
+            raise F.FormatError("wrap")
+        for k, n in (("to", 64), ("epk", 64), ("ct", 96)):
+            if not isinstance(v[k], str) or not re.fullmatch(f"[0-9a-f]{{{n}}}", v[k]):
+                raise F.FormatError("wrap")
+    return chk
+
+
+def wraps(max_n=16):
+    one = wrap_obj()
+
+    def chk(v):
+        if v is None:
+            return
+        if not isinstance(v, list) or len(v) > max_n:
+            raise F.FormatError("wraps")
+        for w in v:
+            one(w)
+        if len({w["to"] for w in v}) != len(v):
+            raise F.FormatError("duplicate wrap recipient")
+    return chk
+
+
+DROP_MODES = ("plain", "link", "gated")
+# drop.item v1, extended: `mode` absent means "plain" (older records keep verifying).
+# Encrypted modes: sha256/size describe the ciphertext; name and MIME type are inside it.
+# refs[0], if present, is the previous version of this file (same author).
 DROP_ITEM = TypeSpec("drop.item", 1, {
-    "sha256": hexhash(required=True), "size": integer(1, 2 * 1024 * 1024),
-    "mime": pattern(r"[a-z]+/[a-z0-9.+-]{1,60}", what="mime"),
-    "name": text(128, multiline=False), "note": text(500, required=False)}, 0)
+    "sha256": hexhash(required=True), "size": integer(1, 5 * 1024 * 1024),
+    "mime": pattern(r"[a-z]+/[a-z0-9.+-]{1,60}", required=False, what="mime"),
+    "name": text(128, required=False, multiline=False), "note": text(500, required=False),
+    "mode": pattern(r"plain|link|gated", required=False, what="mode"),
+    "wraps": wraps()}, 1)
+DROP_GRANT = TypeSpec("drop.grant", 1, {"sha256": hexhash(required=True), "wrap": wrap_obj()}, 1)
+DROP_REVOKE = TypeSpec("drop.revoke", 1, {"to": keyhex()}, 1)
+DROP_REQUEST = TypeSpec("drop.request", 1, {"enc_key": keyhex(),
+                                            "note": text(200, required=False)}, 1)
 
 PROFILE_TYPES = (ID_PROFILE, ID_ROTATE, ID_LINK)
 KIND_TYPES = {
     "room": TypeSet(ROOM_MSG, ROOM_TOPIC, ROOM_JOIN, *PROFILE_TYPES),
     "wiki": TypeSet(WIKI_PAGE, WIKI_REV, WIKI_REVERT, WIKI_PROTECT, *PROFILE_TYPES),
-    "shop": TypeSet(SHOP_LISTING, SHOP_WITHDRAW, SHOP_REVIEW, *PROFILE_TYPES),
-    "drop": TypeSet(DROP_ITEM, *PROFILE_TYPES),
+    "shop": TypeSet(SHOP_LISTING, SHOP_WITHDRAW, SHOP_REVIEW, SHOP_ORDER, *PROFILE_TYPES),
+    "drop": TypeSet(DROP_ITEM, DROP_GRANT, DROP_REVOKE, DROP_REQUEST, *PROFILE_TYPES),
     "id": TypeSet(*PROFILE_TYPES),
 }
 ROOM_TYPES = KIND_TYPES["room"]

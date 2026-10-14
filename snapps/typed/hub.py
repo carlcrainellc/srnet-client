@@ -34,7 +34,7 @@ KIND_POLICY = {  # lighter limits for rooms; heavier for wiki/shop;
 
 class BlobStore:
     """Content-addressed blobs for file drops: stored and served by SHA-256 only."""
-    max_bytes = 2 * 1024 * 1024
+    max_bytes = None  # set from filecrypt below (largest padded ciphertext)
 
     def __init__(self, d):
         self.d = d
@@ -57,6 +57,10 @@ class BlobStore:
             return None
         with open(p, "rb") as f:
             return f.read()
+
+
+from .filecrypt import max_cipher_len  # noqa: E402
+BlobStore.max_bytes = max_cipher_len()
 
 
 class Hub:

@@ -163,7 +163,7 @@ class Backend:
             return {"ok": False, "err": "no wallet yet: run srnet key new"}
         cid, usdc = chain.DEFAULT_CHAINID, gasless.USDC_BY_CHAIN[chain.DEFAULT_CHAINID]
         if self._rpc() != chain.DEFAULT_RPC or self.cfg().get("contract"):  # testnet / custom: ask the chain
-            ch = chain.ChainCfg(rpc=self._rpc(), contract=self.cfg().get("contract") or chain.DEFAULT_CONTRACT)
+            ch = chain.read_only(self._rpc(), self.cfg().get("contract") or chain.DEFAULT_CONTRACT)
             cid, usdc = ch.chainid(), ch.usdc()
         base = int(round(amount * chain.USDC)) if amount else None
         uri = gasless.eip681_uri(usdc, addr, cid, base)
@@ -371,6 +371,9 @@ def run(st: state.State, rpc_url: str | None = None, open_browser: bool = True) 
         opener = shutil.which("xdg-open") or shutil.which("open")  # Linux / macOS
         if opener:
             subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:  # Windows and anything else
+            import webbrowser
+            webbrowser.open(url)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -117,9 +117,12 @@ def main():
     @step("file drop")
     def _():
         data = (run + "\n").encode() * 20
-        assert C.upload("files", data, "demo.txt", "text/plain", run)["result"]["ok"]
-        B.sync("files"); it = B.view("files")["view"]["items"][-1]
-        return B.blob("files", it["sha256"]) == data, "upload + hash-checked download"
+        assert C.upload("files", data, "demo.txt", "text/plain", run, mode="gated",
+                        recipients=[B.enc_pub])["result"]["ok"]
+        B.sync("files"); it = sorted(B.view("files")["view"]["items"], key=lambda i: i["ts"])[-1]
+        host_blob = B.blob("files", it["sha256"])
+        return (B.open_file("files", it["id"])[0] == data and run.encode() not in host_blob,
+                "encrypted upload, host holds ciphertext only, recipient decrypts")
 
     @step("exit board")
     def _():

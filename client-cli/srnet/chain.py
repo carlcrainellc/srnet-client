@@ -488,3 +488,9 @@ def renew_due(ch, lease_id: int, window: int = RENEW_WINDOW) -> tuple[bool, str]
     if end - now <= window:
         return True, "in_window"
     return False, f"wait:{end - now - window}"
+
+
+def read_only(rpc: str, contract: str) -> "ChainCfg":
+    """A ChainCfg for eth_call reads only. Holds a random throwaway key that never signs anything."""
+    import secrets
+    return ChainCfg(rpc=rpc, contract=contract, private_key="0x" + secrets.token_hex(32))

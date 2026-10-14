@@ -149,6 +149,11 @@ def wiki_view(items, policy) -> dict:
 
 
 # ---- shop ------------------------------------------------------------------------------
+def _listing_err(b):
+    from .record import shop_listing_error
+    return shop_listing_error(b)
+
+
 def shop_view(items, policy) -> dict:
     """Listings only from policy sellers; prices and payment targets are passed through
     verbatim for the core's own payment sheet (templates never build payments)."""
@@ -157,13 +162,19 @@ def shop_view(items, policy) -> dict:
     listings, reviews = {}, {}
     for it in items:
         t, a, b = it.get("t"), it.get("author"), it.get("body", {})
-        if t == "shop.listing" and a in sellers:
+        if t == "shop.listing" and a in sellers and not _listing_err(b):
             listings[it["id"]] = dict(b, id=it["id"], seller=a, seller_label=label(ids, a),
                                       ts=it["ts"], active=True)
         elif t == "shop.withdraw":
             lid = (it["refs"] or [None])[0]
             if lid in listings and listings[lid]["seller"] == a:
                 listings[lid]["active"] = False
+        elif t == "shop.order":
+            lid = (it["refs"] or [None])[0]
+            if lid in listings:
+                listings[lid].setdefault("orders", []).append(
+                    {"id": it["id"], "by": label(ids, a), "lease_id": b["lease_id"], "buyer": b["buyer"],
+                     "ts": it["ts"]})
         elif t == "shop.review":
             lid = (it["refs"] or [None])[0]
             if lid in listings and listings[lid]["seller"] != a:
@@ -172,15 +183,62 @@ def shop_view(items, policy) -> dict:
     for lid, l in listings.items():
         rs = list(reviews.get(lid, {}).values())
         l["reviews"] = rs
+        l.setdefault("orders", [])
         l["rating"] = round(sum(r["rating"] for r in rs) / len(rs), 2) if rs else None
     return {"listings": list(listings.values())}
 
 
 # ---- drop ------------------------------------------------------------------------------
-def drop_view(items, policy) -> dict:
+def drop_state(items) -> dict:
+    """Full access state per file (internal to the core: includes key wraps).
+
+    Only the file's author can grant or revoke. A revoke stops the owner's client from wrapping
+    *future versions* to that key; it can't take back a copy someone already downloaded."""
+    files = {it["id"]: it for it in items if it.get("t") == "drop.item"}
+    st = {}
+    for fid, it in files.items():
+        b = it["body"]
+        st[fid] = {"item": it, "owner": it["author"], "mode": b.get("mode") or "plain",
+                   "wraps": {w["to"]: w for w in b.get("wraps") or []}, "revoked": set(),
+                   "requests": [], "prev": (it.get("refs") or [None])[0], "next": None}
+    for fid, s_ in st.items():
+        p = s_["prev"]
+        if p in st and st[p]["owner"] == s_["owner"]:
+            st[p]["next"] = fid
+    for it in items:
+        t, refs = it.get("t"), it.get("refs") or []
+        if t not in ("drop.grant", "drop.revoke", "drop.request") or not refs or refs[0] not in st:
+            continue
+        f = st[refs[0]]
+        b = it["body"]
+        if t == "drop.grant" and it["author"] == f["owner"] and b["sha256"] == f["item"]["body"]["sha256"]:
+            f["wraps"].setdefault(b["wrap"]["to"], b["wrap"])
+        elif t == "drop.revoke" and it["author"] == f["owner"]:
+            f["revoked"].add(b["to"])
+        elif t == "drop.request":
+            f["requests"].append({"id": it["id"], "author": it["author"], "enc_key": b["enc_key"],
+                                  "note": b.get("note") or "", "ts": it["ts"]})
+    return st
+
+
+def drop_view(items, policy, me: str | None = None, my_enc: str | None = None) -> dict:
     ids = identities(items)
-    return {"items": [dict(it["body"], id=it["id"], by=label(ids, it["author"]), ts=it["ts"])
-                      for it in items if it.get("t") == "drop.item"]}
+    out = []
+    for fid, f in drop_state(items).items():
+        it, b = f["item"], f["item"]["body"]
+        enc = f["mode"] != "plain"
+        pending = [r for r in f["requests"] if r["enc_key"] not in f["wraps"] and r["enc_key"] not in f["revoked"]]
+        out.append({"id": fid, "by": label(ids, it["author"]), "ts": it["ts"], "mode": f["mode"],
+                    "encrypted": enc, "name": None if enc else b.get("name"),
+                    "mime": None if enc else b.get("mime"), "size": b["size"], "note": b.get("note"),
+                    "sha256": b["sha256"], "mine": me is not None and it["author"] == me,
+                    "can_open": (not enc) or (my_enc in f["wraps"]),
+                    "recipients": max(0, len(f["wraps"]) - 1), "revoked": len(f["revoked"]),
+                    "requested": any(r["author"] == me for r in f["requests"]),
+                    "requests": [{"id": r["id"], "by": label(ids, r["author"]), "note": r["note"]}
+                                 for r in pending] if me == it["author"] else [],
+                    "prev": f["prev"], "superseded_by": f["next"]})
+    return {"items": out}
 
 
 VIEWS = {"room": room_view, "wiki": wiki_view, "shop": shop_view, "drop": drop_view,
@@ -195,7 +253,11 @@ def host_rules(host, meta) -> str | None:
     if meta.t in ("wiki.protect", "room.topic") and meta.author not in pol.get("admins", []):
         return f"{meta.t} needs an admin key"
     if meta.t == "shop.listing":
-        from .record import TESTNET_CHAINS
-        if meta.body["chain_id"] not in TESTNET_CHAINS and not pol.get("allow_mainnet"):
+        from .record import TESTNET_CHAINS, shop_listing_error
+        err = shop_listing_error(meta.body)
+        if err:
+            return err
+        if meta.body.get("currency") != "SRNET" and meta.body["chain_id"] not in TESTNET_CHAINS \
+                and not pol.get("allow_mainnet"):
             return "payments are testnet-only on this store"
     return None

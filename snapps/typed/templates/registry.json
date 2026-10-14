@@ -4,7 +4,7 @@
   {
    "entry": {
     "template": "board",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "board.post@1",
      "mod.hide@1"
@@ -16,18 +16,18 @@
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
     "bundle_sha256": "f8b5d8b92d082ea8c76a2cd2ad64d8683831dcac496d791f2c6be8f6d081ecfc",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "board template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "board template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "b3a0f1b202fa2903a0f38aa514bedaf57865def168cc3206ee646df9886db214f3d1d0d3dc72c25186302fb9111f7b89b643d29393c842c0bb7827839d3d370a"
+   "sig": "5f1025e34a8ddd761735103396c7492eb9b07be6f0081230128e663c5b0989622c3d226d3bcb6a729e9d8ba266844e54cc41569c67fd49e0dc2e7eafcb3b8f0f"
   },
   {
    "entry": {
     "template": "room",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "room.join@1",
      "room.msg@1",
@@ -40,18 +40,18 @@
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
     "bundle_sha256": "c5a1f5acee23e755899b008a81944f9b713b19b062ff5043d73d9d663b4a4b6e",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "room template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "room template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "d8f212141f5e2166b9cb87ef81d3516f780ed2b4b801532c0c7c75cc54f7790c4f141dd7ef94261d39e9e373ea3386798c431949b485a8d7f203dd48bc85f808"
+   "sig": "e39b0812a5376dc50753e881b4e15771f6c5cce050b867e32020ffef76854182eb9b5bfd6713b256b24f6f394c1ad9f5bac1eaf12e9d7283dd0f09cfe8c66707"
   },
   {
    "entry": {
     "template": "wiki",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "wiki.page@1",
      "wiki.protect@1",
@@ -65,18 +65,18 @@
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
     "bundle_sha256": "f4b478bb6afdaa104d479d37f0b365a6133cb324f885e445e4d62b402a0e7f9f",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "wiki template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "wiki template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "7fe0c3a08f77db3c5b5f56612f17845044600f94d4ed72f2abfdfdcbd7db81781c5dfc413fbaf3619bd19a4161c0dbbef140d38ed4cb2d5b9130174063ab470d"
+   "sig": "74799f8dfd188d9bc15d4b90f0859473300400eed5682e9134bfe5533ba692ac648cf26f0519904b14dc0ae9004c68329d36b6fb7ab6c83deb7e4361f205390a"
   },
   {
    "entry": {
     "template": "profile",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "id.link@1",
      "id.profile@1",
@@ -89,64 +89,68 @@
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
     "bundle_sha256": "a3afeb63fcdedb3314c0a048dac8d6833190724acdf9b5bf27ad62bba509c635",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "profile template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "profile template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "dcbedcb0217e141c821b8b0a229d64729cd068784432d925a7573605829425f1a8591c08dbcc871211fd02179cdc813c26ed8a95a621e47e71ba20e5e3c7130d"
+   "sig": "b897cda345d3c4ff60c544059b8887fe725549473df3a941be654e623cf5dfb924786b2e45e4b08fbcc8a0dd5c0fae125ec775ca22a7dea6a644a9feff0d610c"
   },
   {
    "entry": {
     "template": "shop",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "shop.listing@1",
+     "shop.order@1",
      "shop.review@1",
      "shop.withdraw@1"
     ],
     "files": {
      "app.css": "1d47ff2885f338b3f2c75c98e556ee309f6a4209cfe4370c350aa9852d66208c",
-     "app.js": "0ab228a2fa89012665be6e26e933555c09e90c85095e41ea8a2f5f3c689831e4",
+     "app.js": "5e799fab8ecca9dad9e5a775b97e88adc1ac638d9554c23ffde7bbae90e30c4e",
      "index.html": "eec6748551422be798f392b66229955867a376f05dcc37d7795ee74a2005c69a",
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
-    "bundle_sha256": "c5ff4bf3087b8a6e310f3483a49a5625d4f2c4bbf91b4ca6ab1785134c5f9476",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "shop template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "bundle_sha256": "d576f9dc10dc53a9109efbcd5813ddfcd351ce050c6141bde36f8f4b79e83683",
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "shop template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "d4da32c06adc6bc1af64157e3b0d7d45fd04050e3773e67ac78583c2570120312d2f027fba893dc815f801c447c5064215f6a451a890d7c40ad50d5db6d95e05"
+   "sig": "cf6ef4c80d16408d0bb99fac0007debc02558d3f195c6cb0df198226ec194a81558617fda97bd5e1e8bdbec5a7bf7e11c04519db5c904410d1df261d07801103"
   },
   {
    "entry": {
     "template": "drop",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
-     "drop.item@1"
+     "drop.grant@1",
+     "drop.item@1",
+     "drop.request@1",
+     "drop.revoke@1"
     ],
     "files": {
      "app.css": "1d47ff2885f338b3f2c75c98e556ee309f6a4209cfe4370c350aa9852d66208c",
-     "app.js": "a1a4dd7f5c1a0e850dee52638abed9a98f22728e2fde86456ca42c21e8891182",
+     "app.js": "4da0a45c336cd6f222237a23635fcc9614c7f3b94491379495d750b4f6b44d33",
      "index.html": "eec6748551422be798f392b66229955867a376f05dcc37d7795ee74a2005c69a",
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
-    "bundle_sha256": "c15166f8cc5d017402c623f2b9b4a26d0e2d2ea3d066c84b1d045f0ac62db028",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "drop template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "bundle_sha256": "1231144d1810352598c8776cfd4e81949fe7024414d1e2d4133e947bb6ce1489",
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "drop template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "ff3fb0dd48d43f31ea1ff003ccb355020bd068f9358fe945d56e801f4e86dc90f2e1ac62f2cd19b721a1458ab02176b885f72338de33544a40b0fe55ee75d800"
+   "sig": "72d5fe682a7e6aaa54b15029283b58b3cbfd21260cdd27b994d3cc5b07ca765bb2acf70dd9287559f6c12865ecaf221983c560a7c345e89b9fa5676fb518cf01"
   },
   {
    "entry": {
     "template": "exit",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "exit.listing@v2-legacy"
     ],
@@ -157,18 +161,18 @@
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
     "bundle_sha256": "201ee389592688d7ae6374b3404be14af08a65317defe8065538d9088bb07bf5",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "exit template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "exit template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "da8673df8cad781274a5197b29163bb237ce271fa84cba0ae9e18193060e918954b3a41cd1c029a68cb8c6f7f9cc4c595b3d70e5bd40f56e3dbaec27c6d8b109"
+   "sig": "72ff5ca79423d06aa6532e98830dc42e8fd8cd3d73bc83ae431cd2286aeaa58a513095bdadd27b624aea56461a537b7b74138dd45197578c8c9028914d52030b"
   },
   {
    "entry": {
     "template": "card",
-    "ver": "1.0.0",
+    "ver": "1.1.0",
     "types": [
      "snapp.card@legacy"
     ],
@@ -179,13 +183,13 @@
      "tk.js": "d347cf07fbc0d481c57b87e30372f32ffaf4ba7c8451f206da5c301d62b55a4e"
     },
     "bundle_sha256": "62b181b6af43d71f4f5ee58fdeabfbdce233ab78d7f1f4d43a283e577bcc5ce0",
-    "source_commit": "cda628993e97463b984003ce8f75eb2dd1f650f8",
-    "summary": "card template 1.0.0",
-    "issued_at": 1791966802,
-    "expires_at": 1807518802,
+    "source_commit": "cd16a24f1eef6d0da99127643c8ad7baf0eb4925",
+    "summary": "card template 1.1.0",
+    "issued_at": 1792006944,
+    "expires_at": 1807558944,
     "key_id": "ed25519:fdaae61c278e4e1f"
    },
-   "sig": "5db1a0f3a0121d3f25fadee0145f468b8d8874444b2a024d814b61634ae35170c3932c53cdc7b83e8308271b2730cc7a541d79d2d6c95f8d793ee957e4bcd40b"
+   "sig": "62e0e37654e89df6e5e002a42edefa3dc8264482185305cbc53844db96b116b1e94816a23d94ee398c2dd753ddbffb4a533f01fa90415537a823c137b980b807"
   }
  ]
 }

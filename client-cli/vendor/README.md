@@ -14,3 +14,4 @@ seshdns.py                             from seller/
 The client uses them to verify listings and the board, build claim messages and order the
 connect flow. Update them by copying from upstream; don't edit them here.
 Apache-2.0.
+claim_receiver.py                      from seller/ (feat/claim-delivery), used by tests only
