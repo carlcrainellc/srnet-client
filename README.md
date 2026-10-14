@@ -12,8 +12,41 @@ One app for SRNet: typed SNApps, the exit marketplace, and your SRNet balance.
   No ETH needed.
 - **One way to pay.** Exits, store items and future paid SNApps all use *Pay with SRNet
   balance*, confirmed in the app's own prompt.
+- **Mail.** Sealed messages to anyone's SRNet address, stored by mail hosts until they come
+  online. Hosts can't read your mail or see who sent it. Senders sign every message.
 - **Private files.** File drops are encrypted on your computer before upload. Share with chosen
   people, with anyone who has the link, or publish unencrypted if you choose.
+
+## Mail
+
+Your mail address is your SRNet identity key plus the 1 to 3 mail hosts you pick, shared as a
+`srnet://mail/...` link. Open **Mail** in the SNApps window, or use the command line:
+
+```sh
+srnet mail hosts http://<mail host> [http://<backup host>]   # set your hosts and register
+srnet mail address --name "Alice"                            # your srnet://mail link to share
+srnet mail send 'srnet://mail/...' -s "Hello" -m "Hi Bob"
+srnet mail fetch && srnet mail list && srnet mail read <id>
+srnet mail list requests && srnet mail accept <id>
+srnet mail name 'srnet://room/...' "Bob's room"              # local petname for any srnet:// address
+```
+
+- Each message is signed with your key, then sealed to the recipient's key (X25519 +
+  ChaCha20-Poly1305) and padded to a size bucket (1 KiB to 64 KiB). A mail host sees only
+  the recipient key, the message id, the padded size and the time.
+- Messages go to every host on the recipient's list; your client drops duplicates.
+- Hosts keep mail 7 days by default (30 at most) and delete it when you fetch it. Your
+  client keeps it sealed on disk and opens it only to show it.
+- Reading an inbox needs a fresh signed challenge from the owner's key. Nobody else can list
+  or fetch it.
+- Mail from your contacts goes to **Inbox**. Mail from anyone else goes to **Requests**, which
+  has tighter limits (32 messages, 16 KiB each, 20 per hour). Accepting a sender moves them
+  to your inbox on every host without telling the host who they are.
+- Attachments are encrypted file-drop links (*Encrypted: anyone with the link*), carried
+  inside the sealed message.
+- Petnames are local only. Links can suggest a name; your own name always wins.
+
+Wire format and host API: [`snapps/docs/MAIL.md`](snapps/docs/MAIL.md).
 
 ## Install
 

@@ -616,6 +616,16 @@ def cmd_snapps(args, st: state.State) -> int:
     return subprocess.call(cmd, cwd=str(root))
 
 
+def cmd_mail(args, st: state.State) -> int:
+    """Sealed SRNet mail (typed.mailcli), using the same identity as `srnet snapps`."""
+    root = Path(os.environ.get("SRNET_SNAPPS_DIR") or Path(__file__).resolve().parents[2] / "snapps")
+    if not (root / "typed" / "mailcli.py").exists():
+        print(f"typed SNApps not found at {root}; set SRNET_SNAPPS_DIR", file=sys.stderr)
+        return 2
+    cmd = [sys.executable, "-m", "typed.mailcli", "--data", str(st.root / "snapps"), *args.rest]
+    return subprocess.call(cmd, cwd=str(root))
+
+
 def cmd_ui(args, st: state.State) -> int:
     from . import ui
     return ui.run(st, rpc_url=args.rpc, open_browser=not args.no_browser)
@@ -727,11 +737,19 @@ def main(argv=None) -> int:
     sn.add_argument("--data", help="data dir (default <home>/snapps)")
     sn.add_argument("--port", type=int, default=48920)
 
+    ml = sub.add_parser("mail", help="sealed mail: hosts, address, send, fetch, list, read (see: srnet mail -h)",
+                        add_help=False)
+    ml.add_argument("rest", nargs=argparse.REMAINDER)
+
     u = sub.add_parser("ui", help="local web page on 127.0.0.1 (opens your browser)")
     u.add_argument("--no-browser", action="store_true", help="print the URL only")
     u.add_argument("--rpc")
 
-    args = ap.parse_args(argv)
+    args, extra = ap.parse_known_args(argv)
+    if args.cmd == "mail":
+        args.rest = extra + args.rest
+    elif extra:
+        ap.error("unrecognized arguments: " + " ".join(extra))
     st = state.State(Path(args.home) if args.home else None)
     cmds = {
         "doctor": cmd_doctor,
@@ -749,6 +767,7 @@ def main(argv=None) -> int:
         "pay": cmd_pay,
         "deliver": cmd_deliver,
         "vendor": cmd_vendor,
+        "mail": cmd_mail,
     }
     try:
         return cmds[args.cmd](args, st)
