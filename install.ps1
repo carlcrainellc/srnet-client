@@ -52,6 +52,7 @@ if ($LASTEXITCODE) { throw "pip install failed" }
 
 $Launcher = @"
 @echo off
+set "PYTHONUTF8=1"
 set "SRNET_SNAPPS_DIR=$App\snapps"
 set "PYTHONPATH=$App\client-cli;%PYTHONPATH%"
 "$VPy" -m srnet %*
@@ -59,6 +60,7 @@ set "PYTHONPATH=$App\client-cli;%PYTHONPATH%"
 Set-Content -Path (Join-Path $Bin "srnet.cmd") -Value $Launcher -Encoding ASCII
 $Relayer = @"
 @echo off
+set "PYTHONUTF8=1"
 set "PYTHONPATH=$App\client-cli;%PYTHONPATH%"
 "$VPy" -m srnet.relayer %*
 "@
