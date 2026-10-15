@@ -159,7 +159,7 @@ def c_clock():
 
 
 def c_disk():
-    free = shutil.disk_usage(Path.home()).free / 2**30
+    free = shutil.disk_usage(Path(sys.executable).anchor or "/").free / 2**30
     if free < 0.5:
         return "FAIL", f"{free:.2f} GiB free", "free up at least 1 GiB on the system drive"
     return ("WARN" if free < 2 else "PASS"), f"{free:.1f} GiB free", "free up some space" if free < 2 else ""
@@ -218,13 +218,14 @@ def text(rep: dict) -> str:
     return "\n".join(out) + "\n"
 
 
-def default_report_path() -> Path:
-    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".srnet") / ("SRNet" if WIN else "")
-    return base / "preflight-report.txt"
+def default_report_path(home: Path | None = None) -> Path:
+    if WIN and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "SRNet" / "preflight-report.txt"
+    return Path(home or os.environ.get("SRNET_HOME") or Path.home() / ".srnet") / "preflight-report.txt"
 
 
-def write_report(rep: dict, path: Path | None = None) -> Path:
-    path = Path(path or default_report_path())
+def write_report(rep: dict, path: Path | None = None, home: Path | None = None) -> Path:
+    path = Path(path or default_report_path(home))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text(rep) + "\n" + json.dumps(rep, indent=1) + "\n", encoding="utf-8")
     return path

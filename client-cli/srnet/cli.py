@@ -254,8 +254,11 @@ def cmd_doctor(args, st: state.State) -> int:
     from . import preflight
     rep = preflight.run(skip=tuple(args.skip or ()))
     print(preflight.text(rep), end="")
-    path = preflight.write_report(rep, args.report)
-    print(f"report: {path}  (send this file if you need help)", flush=True)
+    try:
+        path = preflight.write_report(rep, args.report, st.root)
+        print(f"report: {path}  (send this file if you need help)", flush=True)
+    except (OSError, RuntimeError) as e:
+        print(f"report not written: {e}", flush=True)
     if args.setup_only:
         return 1 if rep["preflight"] == "FAIL" else 0
     cfg = _cfg(st)

@@ -349,7 +349,7 @@ def make_handler(be: Backend, token: str, port_ref: list, legacy: bool = False):
                 elif p == "/api/preflight":
                     from . import preflight
                     rep = preflight.run()
-                    r = {"report": rep, "text": preflight.text(rep), "file": str(preflight.write_report(rep))}
+                    r = {"report": rep, "text": preflight.text(rep), "file": str(preflight.write_report(rep, home=be.st.root))}
                 elif p == "/api/snapps":
                     r = be.snapps_url()
                 else:
