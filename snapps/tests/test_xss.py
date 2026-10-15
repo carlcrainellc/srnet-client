@@ -11,7 +11,8 @@ class XSS(unittest.TestCase):
     def test_template_has_no_html_sinks(self):
         js = (TPL / "app.js").read_text()
         code = "\n".join(l for l in js.splitlines() if not l.strip().startswith("//")
-                             and not l.strip().startswith('frame.src = "/frame/" + encodeURIComponent('))
+                             and not l.strip().startswith('frame.src = "/frame/" + encodeURIComponent(')
+                             and not l.strip().startswith('$("w-qr").src = URL.createObjectURL(await q.blob());'))
         for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
                      "eval(", "new Function", ".src =", ".href =", "setAttribute("):
             self.assertNotIn(sink, code, sink)
@@ -66,7 +67,8 @@ class TypedTemplates(unittest.TestCase):
         self.assertGreater(len(files), 8)
         for f in files:
             code = "\n".join(l for l in f.read_text().splitlines() if not l.strip().startswith("//")
-                             and not l.strip().startswith('frame.src = "/frame/" + encodeURIComponent('))
+                             and not l.strip().startswith('frame.src = "/frame/" + encodeURIComponent(')
+                             and not l.strip().startswith('$("w-qr").src = URL.createObjectURL(await q.blob());'))
             for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
                          "eval(", "new Function", "setAttribute(", ".src =", "srcdoc"):
                 self.assertNotIn(sink, code, f"{f}: {sink}")

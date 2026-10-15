@@ -15,8 +15,32 @@
   <p class="muted">Paste a .sesh address or an srnet:// link someone shared with you. The core fetches the host's signed info and shows it before anything is saved.</p>
   <input id="joinlink" size="70" maxlength="400" placeholder="srnet://….sesh/board/lobby#root=…"> <button id="join-go">Look up</button>
   <div id="choices"></div>
+  <h3>Check my setup</h3><p class="muted">Checks Windows, the router service, .sesh DNS, the demo host, your clock, disk and firewall. Read-only; it writes a report file you can send.</p>
+  <button id="preflight-go">Check my setup</button> <span id="preflight-sum" class="muted"></span><pre id="preflight-out" class="log" hidden></pre>
   <h3>Directories</h3><p class="muted">Directory collections you've joined list hosts that opted in; open one in the sidebar and use its Join buttons.</p></section>
-<section id="wallet" hidden><h2>Wallet</h2><p class="muted">Payments in shops use your SRNet balance and are confirmed in a sheet here. Balances, top-ups and keys live in the wallet page: run <code>srnet ui</code>.</p><pre id="wallet-keys"></pre></section>
+<section id="exits" hidden><h2>Exits</h2>
+  <p class="muted">Buy an hour of exit from a seller on the signed board. Payment is final; one hour at a time, and auto-renew buys the next hour near the end.</p>
+  <div class="row"><label>Your .sesh address <input id="x-cs" size="60" spellcheck="false"></label></div>
+  <h3>Lease</h3>
+  <table class="kv"><tr><th>Seller</th><td id="x-seller">-</td></tr><tr><th>Time left</th><td id="x-left">-</td></tr>
+    <tr><th>Connected</th><td id="x-conn">no</td></tr><tr><th>Auto-renew</th><td><label><input id="x-ar" type="checkbox"> renew hourly</label></td></tr></table>
+  <button id="x-disconnect">Disconnect</button> <button id="x-refresh">Refresh</button>
+  <h3>Exit sellers</h3><p class="muted" id="x-boardinfo"></p>
+  <label><input id="x-fund" type="checkbox"> deposit if needed (up to 3% fee)</label>
+  <table id="x-board" class="grid"><thead><tr><th>Seller</th><th>Region</th><th>USDC/hr</th><th>Last refresh</th><th></th></tr></thead><tbody></tbody></table>
+  <pre id="x-log" class="log"></pre></section>
+<section id="wallet" hidden><h2>Wallet</h2>
+  <table class="kv"><tr><th>Address</th><td id="w-addr">-</td></tr><tr><th>USDC in wallet</th><td id="w-usdc">-</td></tr>
+    <tr><th>SRNet balance</th><td id="w-dep">-</td></tr><tr><th>ETH for gas</th><td id="w-eth">-</td></tr></table>
+  <button id="w-refresh">Refresh</button> <span class="muted">Balances need your passphrase; you're asked in a sheet and it isn't saved.</span>
+  <pre id="wallet-keys" class="muted"></pre>
+  <h3>Top up from a phone wallet</h3>
+  <label>Amount (USDC) <input id="w-amt" type="number" min="1" step="1" value="10"></label> <button id="w-showqr">Show QR</button>
+  <pre id="w-warn" class="warn"></pre><img id="w-qr" alt="top-up QR" width="240" height="240" hidden><p class="muted" id="w-uri"></p>
+  <p>After you send, press <b>Deposit when it arrives</b>. The client waits for the USDC, signs a gas-free approval and a relayer moves it into your SRNet balance. You never need ETH.</p>
+  <label>Relayer URL <input id="w-relayer" size="40" spellcheck="false" placeholder="not set"></label> <button id="w-saverelayer">Save</button>
+  <button id="w-topup">Deposit when it arrives</button><p class="muted" id="w-topupstate"></p>
+  <p class="muted">Shop payments use your SRNet balance and are confirmed in a sheet here.</p></section>
 <iframe id="tpl" sandbox="allow-scripts" referrerpolicy="no-referrer" title="template"></iframe></main></div>
 <div id="sheet" hidden><div class="card"><h3 id="sheet-title"></h3><div class="muted" id="sheet-sub"></div>
   <pre id="sheet-body"></pre><label id="sheet-inl" hidden><span id="sheet-inlt"></span> <input id="sheet-in" autocomplete="off" maxlength="80"></label><label id="sheet-pwl" hidden>Wallet passphrase <input id="sheet-pw" type="password" autocomplete="off"></label><div id="sheet-buttons"></div></div></div>

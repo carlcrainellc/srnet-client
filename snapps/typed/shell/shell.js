@@ -50,8 +50,8 @@ async function onFile(m) {
 function post(msg) { if (frame && frame.contentWindow) frame.contentWindow.postMessage(msg, "*"); }
 async function push() { if (!cur) return; const v = await api("view/" + encodeURIComponent(cur.name) + "?read=1"); post({type: "view", data: v}); if (!SIDE.loaded) side();
   const st = v.status || {}; $("status").textContent = cur.name + " · " + (st.error ? "STALE: " + st.error : "verified via " + (st.host || "-")) + (v.hidden ? " · " + v.hidden + " hidden by host" : ""); }
-function show(which) { // "frame" | "home" | "wallet"
-  $("tpl").hidden = which !== "frame"; $("home").hidden = which !== "home"; $("wallet").hidden = which !== "wallet";
+function show(which) { // "frame" | "home" | "wallet" | "exits"
+  $("tpl").hidden = which !== "frame"; $("home").hidden = which !== "home"; $("wallet").hidden = which !== "wallet"; $("exits").hidden = which !== "exits";
   if (which !== "frame") { cur = null; clearInterval(timer); $("upload").hidden = true; }
 }
 function ribbon(b) { document.querySelectorAll("#ribbon button").forEach((x) => x.classList.toggle("on", x.dataset.b === b)); }
@@ -162,11 +162,18 @@ window.addEventListener("message", async (ev) => {
 });
 document.addEventListener("DOMContentLoaded", async () => {
   frame = $("tpl"); S = await api("collections");
-  const exits = S.collections.filter((c) => c.kind === "exit");
   document.querySelectorAll("#ribbon button").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.b === "home") { show("home"); ribbon("home"); }
-    else if (b.dataset.b === "wallet") { show("wallet"); ribbon("wallet"); $("wallet-keys").textContent = "posting key: " + S.me; }
-    else if (exits.length) open(exits[0]); else { show("home"); $("status").textContent = "no exit list configured"; } }));
+    else if (b.dataset.b === "wallet") { cur = null; show("wallet"); ribbon("wallet"); $("wallet-keys").textContent = "posting key: " + S.me; W.status(); }
+    else { cur = null; show("exits"); ribbon("exits"); W.board(); W.status(); } }));
+  W.wire();
+  $("preflight-go").addEventListener("click", async () => {
+    $("preflight-sum").textContent = "checking… (up to a minute)"; $("preflight-go").disabled = true;
+    try { const r = await api("wallet/preflight", {});
+      if (!r.ok) { $("preflight-sum").textContent = "couldn't run: " + r.err; return; }
+      $("preflight-sum").textContent = "result: " + r.report.preflight + " · report saved to " + r.file;
+      $("preflight-out").textContent = r.text; $("preflight-out").hidden = false;
+    } finally { $("preflight-go").disabled = false; } });
   $("join-go").addEventListener("click", () => joinFlow($("joinlink").value.trim()));
   $("joinlink").addEventListener("keydown", (e) => { if (e.key === "Enter") joinFlow($("joinlink").value.trim()); });
   setInterval(side, 10000);
@@ -181,6 +188,83 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("openlink-go").addEventListener("click", async () => { const link = $("openlink").value.trim(); if (link) await saveFile("file/openlink", {link}); });
   const qs = new URLSearchParams(location.search), want = qs.get("c");
   const first = want && S.collections.find((c) => c.name === want);
-  if (first) open(first); else { show("home"); ribbon("home"); side(); }
+  const tab = qs.get("tab");
+  if (first) open(first); else if (tab === "exits" || tab === "wallet") { side(); $("ribbon").querySelector('[data-b="' + tab + '"]').click(); } else { show("home"); ribbon("home"); side(); }
   if (qs.get("join")) { $("joinlink").value = qs.get("join").slice(0, 400); joinFlow(qs.get("join")); } // a link handler: shows the sheet, never auto-joins
 });
+
+// ---- Exits + Wallet tabs: native views over the wallet backend (/api/wallet/* bridge in the core).
+// Mainnet rules (final payment, passphrase per action, relayer allow-list) are enforced in the backend.
+const W = (() => {
+  const call = (name, body) => api("wallet/" + name, body || {});
+  const log = (m) => { const t = new Date().toLocaleTimeString(); $("x-log").textContent = t + "  " + m + "\n" + $("x-log").textContent; };
+  const fmt = (v, d) => (v === undefined || v === null) ? "-" : Number(v).toFixed(d);
+  const ago = (s) => s < 3600 ? Math.floor(s / 60) + "m ago" : Math.floor(s / 3600) + "h" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + "m ago";
+  function withPass(title, sub, lines, label, fn) { // passphrase only in this trusted sheet, never stored
+    sheet(title, sub, lines, [[label, async () => fn($("sheet-pw").value)], ["Cancel", async () => {}]], true);
+  }
+  function fill(r) {
+    $("w-addr").textContent = r.address || "no keystore (run srnet key new)";
+    $("w-usdc").textContent = fmt(r.usdc_wallet, 2); $("w-dep").textContent = fmt(r.deposited, 2); $("w-eth").textContent = fmt(r.eth, 6);
+    $("x-seller").textContent = r.seller || "-";
+    $("x-conn").textContent = r.connected ? "yes (" + String(r.connected).slice(0, 12) + "…)" : "no";
+    $("x-ar").checked = !!r.auto_renew;
+    $("x-left").textContent = r.time_left_s !== undefined ? Math.floor(r.time_left_s / 60) + " min" + (r.seller_stopped ? " (seller stopped)" : "") : (r.seller ? "press Refresh and enter your passphrase" : "-");
+    if (r.client_sesh && !$("x-cs").value) $("x-cs").value = r.client_sesh;
+  }
+  async function status(pw) { const r = await call("status", pw ? {passphrase: pw} : {}); if (!r.ok) log("status: " + r.err); fill(r); return r; }
+  async function act(name, extra, pw) {
+    log(name + "…");
+    const r = await call(name, Object.assign({passphrase: pw || null, client_sesh: $("x-cs").value.trim()}, extra));
+    log((r.ok ? "ok " : "failed ") + (r.err || "") + (r.out ? "\n" + r.out : "")); await status(pw); return r;
+  }
+  async function board() {
+    $("x-boardinfo").textContent = "loading the signed exit board…";
+    const r = await call("board"); const tb = $("x-board").querySelector("tbody"); tb.replaceChildren();
+    if (!r.ok) { $("x-boardinfo").textContent = "board unavailable: " + r.err; return; }
+    $("x-boardinfo").textContent = "signed board seq " + r.seq + " from " + r.source + (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.listings.length ? "" : " · no sellers listed right now");
+    for (const l of r.listings) {
+      const tr = el("tr"); [l.seller, l.region || "-", l.price, ago(l.age_s)].forEach((t) => tr.appendChild(el("td", t)));
+      const td = el("td"), b = el("button", "Buy 1 hour"), c = el("button", "Connect");
+      b.addEventListener("click", () => withPass("Buy 1 hour of exit?", "Payment is final. No refund.",
+        ["seller: " + l.seller, "price: " + l.price + " USDC/hr", $("x-fund").checked ? "deposit if needed (up to 3% fee)" : "from your SRNet balance"],
+        "Buy (final)", (pw) => act("buy", {seller: l.seller, fund: $("x-fund").checked}, pw)));
+      c.addEventListener("click", () => withPass("Connect to this exit?", "uses your current lease", ["seller: " + l.seller], "Connect", (pw) => act("connect", {seller: l.seller}, pw)));
+      td.append(b, c); tr.appendChild(td); tb.appendChild(tr);
+    }
+  }
+  let topupTimer = null;
+  async function pollTopup() {
+    const r = await call("topup/status");
+    $("w-topupstate").textContent = r.state + (r.out ? ": " + r.out.trim().split("\n").slice(-2).join(" ") : "");
+    if (r.state !== "waiting" && topupTimer) { clearInterval(topupTimer); topupTimer = null; status(); }
+  }
+  async function showQr() {
+    const r = await call("topup/info", {amount: $("w-amt").value});
+    if (!r.ok) { $("w-warn").textContent = "top up: " + r.err; return; }
+    $("w-warn").textContent = r.warning + "\nDeposit fee: " + r.fee_pct + "% of the whole deposit. Relayer fee: " + Number(r.relay_fee).toFixed(2) + " USDC.";
+    $("w-uri").textContent = r.uri;
+    const q = r.qr ? await fetch("/api/wallet/qr.svg", {headers: {"X-Core": "1"}}) : null;
+    if (q && q.ok) {
+      $("w-qr").src = URL.createObjectURL(await q.blob()); // reviewed: blob: of the core's own QR svg; img-src allows blob: only
+      $("w-qr").hidden = false; }
+    else { $("w-qr").hidden = true; $("w-uri").textContent += "  (install the qrcode package for a QR image; the address works too)"; }
+    if (!$("w-relayer").value) $("w-relayer").value = r.relayer || "";
+  }
+  function wire() {
+    if (!S.wallet) { $("x-boardinfo").textContent = "wallet not running: start SRNet with `srnet ui`"; }
+    $("x-refresh").addEventListener("click", () => { board(); withPass("Refresh lease and balances?", "your passphrase unlocks the keystore for this read only", [], "Refresh", (pw) => status(pw)); });
+    $("w-refresh").addEventListener("click", () => withPass("Refresh balances?", "your passphrase unlocks the keystore for this read only", [], "Refresh", (pw) => status(pw)));
+    $("x-disconnect").addEventListener("click", () => act("disconnect", {}));
+    $("x-ar").addEventListener("change", (e) => { const on = e.target.checked;
+      if (!on) return act("autorenew", {on: false});
+      e.target.checked = false; withPass("Turn on auto-renew?", "buys the next hour near the end of each lease; each hour is final", [], "Turn on", (pw) => act("autorenew", {on: true}, pw)); });
+    $("w-showqr").addEventListener("click", showQr);
+    $("w-saverelayer").addEventListener("click", async () => { const r = await call("relayer", {url: $("w-relayer").value.trim()}); $("w-topupstate").textContent = r.ok ? "relayer saved" : r.err; });
+    $("w-topup").addEventListener("click", () => withPass("Deposit when it arrives?", "waits for the USDC, then a gas-free approval and the relayer deposit", ["amount: " + $("w-amt").value + " USDC"], "Start", async (pw) => {
+      const r = await call("topup/start", {amount: $("w-amt").value, passphrase: pw});
+      if (!r.ok) { $("w-topupstate").textContent = "top up: " + r.err; return; }
+      if (!topupTimer) topupTimer = setInterval(pollTopup, 5000); pollTopup(); }));
+  }
+  return {board, status, wire};
+})();

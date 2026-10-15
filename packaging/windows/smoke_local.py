@@ -109,11 +109,24 @@ try:
     fid = next(i["id"] for i in items if i.get("note") == "smoke")
     assert api("file/open", {"c": "files", "id": fid}) == secret
     print("PASS encrypted upload + open", flush=True)
+    # the smoke's `srnet snapps` (now an alias of ui) already serves 48920: ui must reuse it, not start a second core
     ui = start(srnet + ["--home", str(home), "ui", "--no-browser"])
-    url = wait_line(ui, "http://127.0.0.1:").split("srnet ui: ", 1)[1].strip()
-    page = urllib.request.urlopen(url, timeout=10).read().decode()
-    assert "Exits" in page and "Wallet / Top up" in page
-    print("PASS srnet ui Exits + Wallet tabs", flush=True)
+    url = wait_line(ui, "http://127.0.0.1:").split("srnet ui: ", 1)[1].split()[0]
+    page = None
+    for _ in range(90):
+        try:
+            page = urllib.request.urlopen(url, timeout=5).read().decode(); break
+        except OSError:
+            time.sleep(1)
+    if page is None:
+        ui.terminate(); print("srnet ui output:", ui.stdout.read()[-3000:], flush=True)
+    assert page and 'data-b="exits"' in page and "Top up from a phone wallet" in page, page
+    hdr = {"X-Core": "1", "Content-Type": "application/json"}
+    col = json.loads(urllib.request.urlopen(urllib.request.Request(url + "api/collections", headers=hdr), timeout=10).read())
+    assert col.get("wallet") is True, col
+    ts = json.loads(urllib.request.urlopen(urllib.request.Request(url + "api/wallet/topup/status", data=b"{}", headers=hdr), timeout=10).read())
+    assert ts.get("ok") is True, ts
+    print("PASS srnet ui: one app, native Exits + Wallet tabs, wallet bridge answers", flush=True)
     print("SMOKE OK")
 finally:
     stop_all()

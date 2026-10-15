@@ -43,12 +43,22 @@ from .sync import SyncError, http_json, submit, sync_once
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "templates"
+# Exits / Wallet tabs: `srnet ui` runs the wallet backend (srnet.ui, token-protected, loopback) and
+# passes it here as SRNET_WALLET_API=http://127.0.0.1:<port>/#<token>. The shell reaches it only
+# through the X-Core-gated /api/wallet/* bridge below, so the token never reaches a page.
+WALLET_CALLS = {"board", "status", "buy", "connect", "autorenew", "disconnect", "topup/info",
+                "topup/start", "topup/status", "relayer", "preflight"}
+
+
+def wallet_from_env():
+    m = re.fullmatch(r"(http://127\.0\.0\.1:\d+)/#([A-Za-z0-9_-]{16,})", os.environ.get("SRNET_WALLET_API", ""))
+    return (m.group(1), m.group(2)) if m else None
 SHELL = HERE / "shell"
 KIND_TEMPLATE = {"board": "board", "room": "room", "wiki": "wiki", "shop": "shop",
                  "drop": "drop", "id": "profile", "exit": "exit", "card": "card",
                  "directory": "directory"}
 SHELL_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-             "frame-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; "
+             "frame-src 'self'; img-src blob:; base-uri 'none'; form-action 'none'; "
              "frame-ancestors 'none'")
 ACTIONS = {"follow", "unfollow", "mute", "unmute", "reveal", "unreveal"}
 
@@ -140,6 +150,7 @@ class Core:
         self.dir = Path(data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.clock, self.autoconfirm = clock, autoconfirm
+        self.wallet = wallet_from_env()
         kp = self.dir / "author.key"  # posting key: NOT the Session Router transport key
         if not kp.exists():
             with open(os.open(kp, os.O_WRONLY | os.O_CREAT, 0o600), "wb") as f:
@@ -939,6 +950,30 @@ def make_handler(core: Core, test_mode=False):
         def _json(self, code, obj):
             self._send(code, json.dumps(obj).encode(), "application/json; charset=utf-8")
 
+        def _wallet(self, call, raw=None):
+            """Bridge to the wallet backend (exits, lease, balances, top-up). Mainnet rules live there."""
+            if core.wallet is None:
+                return self._json(200, {"ok": False, "err": "wallet not running: start SRNet with `srnet ui`"})
+            base, tok = core.wallet
+            if call == "qr.svg":
+                try:
+                    with urllib.request.urlopen(f"{base}/qr.svg?k={tok}", timeout=10) as r:
+                        return self._send(200, r.read(1 << 20), "image/svg+xml")
+                except OSError as e:
+                    return self._json(404, {"ok": False, "err": str(e)[:200]})
+            if call not in WALLET_CALLS:
+                return self._json(404, {"ok": False, "err": "unknown wallet call"})
+            req = urllib.request.Request(f"{base}/api/{call}", data=raw or b"{}", method="POST",
+                                         headers={"Content-Type": "application/json", "X-CSRF-Token": tok})
+            try:
+                with urllib.request.urlopen(req, timeout=600) as r:
+                    body = r.read(1 << 22)
+            except urllib.error.HTTPError as e:
+                body = e.read(1 << 16)
+            except OSError as e:
+                body = json.dumps({"ok": False, "err": "wallet backend: " + str(e)[:200]}).encode()
+            return self._send(200, body, "application/json; charset=utf-8")
+
         def _api_ok(self):
             """Only the trusted shell may call the API: same loopback host, no foreign Origin,
             and the X-Core header (which navigations, forms and sandboxed frames can't add)."""
@@ -972,6 +1007,8 @@ def make_handler(core: Core, test_mode=False):
             if not u.path.startswith("/api/") or not self._api_ok():
                 return self._json(403, {"error": "core API: trusted shell only"})
             p = u.path[5:]
+            if p == "wallet/qr.svg":
+                return self._wallet("qr.svg")
             try:
                 if p == "collections":
                     return self._json(200, {"collections": [
@@ -980,7 +1017,8 @@ def make_handler(core: Core, test_mode=False):
                          "label": core.prefs["joined"].get(c.id, {}).get("label") or c.id}
                         for c in core.colls.values()], "me": core.me,
                         "templates": core.templates.status(), "test": test_mode,
-                        "outbox": len(core.prefs["outbox"])})
+                        "outbox": len(core.prefs["outbox"]),
+                        "wallet": core.wallet is not None})
                 if p == "sidebar":
                     return self._json(200, core.sidebar())
                 if p.startswith("view/"):
@@ -1003,6 +1041,8 @@ def make_handler(core: Core, test_mode=False):
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(min(n, (FC.MAX_PLAIN * 4 // 3 if u.path == "/api/mail/attach" else FC.MAX_PLAIN) + (64 << 10)))
             p = u.path[5:]
+            if p.startswith("wallet/"):
+                return self._wallet(p[7:], raw)
             try:
                 if p == "upload":
                     q = parse_qs(u.query)

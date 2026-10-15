@@ -238,7 +238,7 @@ def _ok_sesh(s) -> bool:
     return isinstance(s, str) and s.endswith(".sesh") and len(s) == 57 and s[:52].isalnum()
 
 
-def make_handler(be: Backend, token: str, port_ref: list):
+def make_handler(be: Backend, token: str, port_ref: list, legacy: bool = False):
     page = (WEB / "index.html").read_text().replace("@TOKEN@", token)
 
     class H(BaseHTTPRequestHandler):
@@ -278,6 +278,8 @@ def make_handler(be: Backend, token: str, port_ref: list):
                 return self._send(403, b"forbidden\n", "text/plain")
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
+            if u.path in ("/", "/app.js", "/style.css") and not legacy:
+                return self._send(404, b"the wallet now lives in the SRNet app's Exits and Wallet tabs: run srnet ui\n", "text/plain")
             if u.path == "/":
                 if not self._tok((q.get("k") or [None])[0]):
                     return self._send(403, b"open the link printed by srnet ui\n", "text/plain")
@@ -344,6 +346,10 @@ def make_handler(be: Backend, token: str, port_ref: list):
                     r = be.topup_status()
                 elif p == "/api/relayer":
                     r = be.set_relayer(req.get("url") or "")
+                elif p == "/api/preflight":
+                    from . import preflight
+                    rep = preflight.run()
+                    r = {"report": rep, "text": preflight.text(rep), "file": str(preflight.write_report(rep))}
                 elif p == "/api/snapps":
                     r = be.snapps_url()
                 else:
@@ -355,17 +361,28 @@ def make_handler(be: Backend, token: str, port_ref: list):
     return H
 
 
-def serve(be: Backend, port: int = 0) -> tuple[ThreadingHTTPServer, str]:
+def serve(be: Backend, port: int = 0, legacy: bool = False) -> tuple[ThreadingHTTPServer, str]:
     token = secrets.token_urlsafe(24)
     port_ref = [0]
-    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(be, token, port_ref))
+    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(be, token, port_ref, legacy))
     port_ref[0] = srv.server_address[1]
     return srv, f"http://127.0.0.1:{port_ref[0]}/?k={token}"
 
 
-def run(st: state.State, rpc_url: str | None = None, open_browser: bool = True) -> int:
+def start_background(st: state.State, rpc_url: str | None = None) -> str:
+    """Serve the wallet API on a thread for `srnet ui`; returns http://127.0.0.1:<port>/#<token>
+    (the form typed.core reads from SRNET_WALLET_API)."""
     be = Backend(st, rpc_url)
     srv, url = serve(be)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base, tok = url.split("?k=", 1)
+    return f"{base}#{tok}"
+
+
+def run(st: state.State, rpc_url: str | None = None, open_browser: bool = True, legacy: bool = True) -> int:
+    """The retired standalone page (hidden flag: srnet ui --legacy-page)."""
+    be = Backend(st, rpc_url)
+    srv, url = serve(be, legacy=legacy)
     print(f"srnet ui: {url}\n(local only; Ctrl-C to stop)", flush=True)
     if open_browser:
         opener = shutil.which("xdg-open") or shutil.which("open")  # Linux / macOS

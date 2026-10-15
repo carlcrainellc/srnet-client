@@ -82,13 +82,21 @@ to the Start menu. `-Uninstall` removes it. `srnet ui` and `srnet snapps` work o
 
 ## The app
 
-`srnet ui` opens a local page on `127.0.0.1` with three tabs:
+`srnet ui` (or plain `srnet`; `srnet snapps` is an alias) is the one app. It opens SNApps on Home
+on `127.0.0.1:48920`, with three ribbon tabs in the same window and style:
 
-- **SNApps** links to the SNApps window started with `srnet snapps --config client.json`.
-- **Exits** lists sellers with region, price per hour and last refresh, and has buttons to buy
-  one hour, auto-renew, connect and disconnect.
-- **Wallet / Top up** shows your wallet address, USDC, SRNet balance, and a QR code for topping
-  up from a phone wallet.
+- **Home**: join a collection, your sidebar of rooms, boards, file drops, mail, and **Check my setup**.
+- **Exits**: the signed seller board (region, price per hour, last refresh), buy one hour (final,
+  passphrase asked in a sheet), connect, disconnect, auto-renew and lease status.
+- **Wallet**: wallet address, USDC, SRNet balance, ETH, and the phone top-up QR with gasless deposit.
+
+The wallet backend runs inside the same process on a token-protected loopback port; the shell
+reaches it only through the core's API. The old standalone wallet page is retired
+(`srnet ui --legacy-page` keeps it for now).
+
+`srnet doctor` (and Check my setup) runs a read-only preflight: Windows version/arch, service and
+admin, Wintun, ports, router service + API, `.sesh` DNS, a demo reachability probe, clock, disk and
+firewall/AV/VPN. Each line is PASS/WARN/FAIL with a FIX hint; a report file is written for support.
 
 The page only answers to the link it prints, and your keystore passphrase is used for the
 action you click and never saved.
@@ -105,7 +113,7 @@ srnet pay --vendor-id V --amount N   pay any SRNet seller from your balance
 srnet vendor --shop-key K        seller: set up SRNet-balance payments
 srnet deliver                    resend your exit claim to the seller
 srnet status | stop | disconnect
-srnet snapps --config F          the SNApps window
+srnet ui [--config F]            the app (SNApps + Exits + Wallet); `snapps` is an alias
 srnet key new|import|show        your encrypted wallet
 srnet doctor                     check setup
 ```

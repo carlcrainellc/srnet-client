@@ -14,7 +14,7 @@
   srnet pay --vendor-id V --amount N  pay any SRNet seller from your SRNet balance
   srnet vendor --shop-key K  seller: bind a vendor id for SRNet-balance payments
   srnet snapps [--config F] typed SNApps client (boards, rooms, wiki, shop, drop, pages)
-  srnet ui                 open the local web page (SNApps, Exits, Wallet / Top up)
+  srnet ui                 the app: SNApps, Exits, Wallet / Top up (also plain `srnet`)
 
 PAYMENT IS FINAL: once a lease starts the seller may take that hour; there is no buyer
 cancel and no refund. Buying one hour at a time keeps the most you can lose at about one hour's price.
@@ -249,7 +249,15 @@ def _chain_name(cid: int) -> str:
 
 
 def cmd_doctor(args, st: state.State) -> int:
-    """Check what buy/connect need, one line per item. Exit 0 if nothing failed."""
+    """Setup preflight (Windows, router, DNS, demo, clock...) then what buy/connect need.
+    Exit 0 if nothing failed. --setup-only skips the wallet/chain part."""
+    from . import preflight
+    rep = preflight.run(skip=tuple(args.skip or ()))
+    print(preflight.text(rep), end="")
+    path = preflight.write_report(rep, args.report)
+    print(f"report: {path}  (send this file if you need help)", flush=True)
+    if args.setup_only:
+        return 1 if rep["preflight"] == "FAIL" else 0
     cfg = _cfg(st)
     bad = 0
 
@@ -625,7 +633,67 @@ def cmd_snapps(args, st: state.State) -> int:
             print(f"config not found: {user_cfg}", file=sys.stderr)
             return 2
         cmd += ["--config", str(user_cfg.resolve())]
-    return subprocess.call(cmd, cwd=str(root))
+    child = subprocess.Popen(cmd, cwd=str(root))
+    if os.name != "nt":  # SIGTERM to `srnet ui` must not orphan the core (it would keep the port)
+        import signal
+        signal.signal(signal.SIGTERM, lambda *a: (child.terminate(), sys.exit(143)))
+    try:
+        return child.wait()
+    except KeyboardInterrupt:
+        child.terminate()
+        raise
+    finally:
+        if child.poll() is None:
+            child.terminate()
+
+
+def cmd_ui(args, st: state.State) -> int:
+    """The SRNet app: SNApps shell (opens on Home) with native Exits and Wallet tabs.
+    The wallet backend (srnet.ui) runs on a token-protected loopback port inside this process;
+    the core bridges the shell to it. `srnet snapps` is an alias. If a client already answers
+    on --port, just open it."""
+    if getattr(args, "legacy_page", False):  # hidden: the retired standalone wallet page
+        from . import ui
+        return ui.run(st, rpc_url=args.rpc, open_browser=not args.no_browser, legacy=True)
+    import socket
+    import threading
+    import time
+    import webbrowser
+    home = f"http://127.0.0.1:{args.port}/"
+
+    def up(port=None) -> bool:
+        try:
+            socket.create_connection(("127.0.0.1", port or args.port), timeout=1).close()
+            return True
+        except OSError:
+            return False
+    # one app per home: a second core on the same data dir would block on its database
+    pf = st.root / "ui.port"
+    try:
+        prev = int(pf.read_text().strip())
+    except (OSError, ValueError):
+        prev = None
+    if prev and prev != args.port and up(prev):
+        args.port, home = prev, f"http://127.0.0.1:{prev}/"
+    if up():
+        print(f"srnet ui: {home} (already running)", flush=True)
+        if not args.no_browser:
+            webbrowser.open(home)
+        return 0
+    from . import ui
+    os.environ["SRNET_WALLET_API"] = ui.start_background(st, rpc_url=args.rpc)
+    if not args.no_browser:
+        def _open():
+            for _ in range(240):
+                if up():
+                    webbrowser.open(home)
+                    return
+                time.sleep(0.5)
+        threading.Thread(target=_open, daemon=True).start()
+    print(f"srnet ui: {home}\n(local only; Ctrl-C to stop)", flush=True)
+    st.root.mkdir(parents=True, exist_ok=True)
+    pf.write_text(str(args.port))
+    return cmd_snapps(args, st)
 
 
 def cmd_open(args, st: state.State) -> int:
@@ -656,11 +724,6 @@ def cmd_mail(args, st: state.State) -> int:
     return subprocess.call(cmd, cwd=str(root))
 
 
-def cmd_ui(args, st: state.State) -> int:
-    from . import ui
-    return ui.run(st, rpc_url=args.rpc, open_browser=not args.no_browser)
-
-
 def main(argv=None) -> int:
     # Ensure lease_flow importable
     if str(_LEASE) not in sys.path:
@@ -670,9 +733,13 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--home", help="state dir (default ~/.srnet or $SRNET_HOME)")
     ap.add_argument("--keystore", help="wallet keystore file (default $SRNET_HOME/keystore.json)")
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
+    sub = ap.add_subparsers(dest="cmd", metavar="COMMAND")
+    ap.set_defaults(port=48920, no_browser=False, rpc=None, config=None, data=None, legacy_page=False)
 
-    dr = sub.add_parser("doctor", help="check packages, RPC, chain, wallet and balances")
+    dr = sub.add_parser("doctor", help="check my setup (router, DNS, demo...) then packages, RPC, chain, wallet")
+    dr.add_argument("--setup-only", action="store_true", help="only the setup preflight")
+    dr.add_argument("--report", help="report file (default %%LOCALAPPDATA%%\\SRNet\\preflight-report.txt)")
+    dr.add_argument("--skip", action="append", help="skip a check by name (repeatable), e.g. --skip demo")
     dr.add_argument("--listings", help="listings file; its contract and chain are checked")
     dr.add_argument("--contract", help="contract address to check when no listings are loaded")
     dr.add_argument("--rpc", help="JSON-RPC URL (default $SRNET_RPC, else Arbitrum One public RPC)")
@@ -762,11 +829,17 @@ def main(argv=None) -> int:
     vd.add_argument("--yes", action="store_true")
     vd.add_argument("--contract"); vd.add_argument("--rpc"); vd.add_argument("--private-key")
 
-    sn = sub.add_parser("snapps", help="start the typed-SNApp client on 127.0.0.1")
-    sn.add_argument("--config", help="your client.json, layered on the shipped defaults "
-                    "(default <home>/client.json if it exists)")
-    sn.add_argument("--data", help="data dir (default <home>/snapps)")
-    sn.add_argument("--port", type=int, default=48920)
+    u = sub.add_parser("ui", help="the SRNet app on 127.0.0.1: SNApps, Exits, Wallet (opens your browser); the default")
+    sn = sub.add_parser("snapps", help="alias of ui")
+    for x in (u, sn):
+        x.add_argument("--no-browser", action="store_true", help="print the URL only")
+        x.add_argument("--rpc", help="JSON-RPC URL for the wallet (default $SRNET_RPC, else Arbitrum One public RPC)")
+        x.add_argument("--legacy-page", action="store_true", help=argparse.SUPPRESS)
+        x.add_argument("--config", help="your client.json, layered on the shipped defaults "
+                       "(default <home>/client.json if it exists)")
+        x.add_argument("--data", help="data dir (default <home>/snapps)")
+        x.add_argument("--port", type=int, default=48920)
+    sn.set_defaults(no_browser=True)  # old behaviour: `srnet snapps` didn't open a browser
 
     op = sub.add_parser("open", help="open an srnet:// link in the SNApps client (shows the join sheet)")
     op.add_argument("link")
@@ -775,10 +848,6 @@ def main(argv=None) -> int:
     ml = sub.add_parser("mail", help="sealed mail: hosts, address, send, fetch, list, read (see: srnet mail -h)",
                         add_help=False)
     ml.add_argument("rest", nargs=argparse.REMAINDER)
-
-    u = sub.add_parser("ui", help="local web page on 127.0.0.1 (opens your browser)")
-    u.add_argument("--no-browser", action="store_true", help="print the URL only")
-    u.add_argument("--rpc")
 
     args, extra = ap.parse_known_args(argv)
     if args.cmd == "mail":
@@ -799,7 +868,8 @@ def main(argv=None) -> int:
         "ui": cmd_ui,
         "open": cmd_open,
         "topup": cmd_topup,
-        "snapps": cmd_snapps,
+        "snapps": cmd_ui,
+        None: cmd_ui,
         "pay": cmd_pay,
         "deliver": cmd_deliver,
         "vendor": cmd_vendor,

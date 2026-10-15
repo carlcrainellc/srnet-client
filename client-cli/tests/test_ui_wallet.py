@@ -21,7 +21,7 @@ class WalletUiTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         self.be = ui.Backend(state.State(self.home))
-        self.srv, url = ui.serve(self.be)
+        self.srv, url = ui.serve(self.be, legacy=True)
         self.token = url.split("k=", 1)[1]
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()

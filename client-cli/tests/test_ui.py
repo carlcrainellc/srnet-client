@@ -37,7 +37,7 @@ class UiTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         self.be = FakeBackend(state.State(self.home))
-        self.srv, self.url = ui.serve(self.be)
+        self.srv, self.url = ui.serve(self.be, legacy=True)
         self.port = self.srv.server_address[1]
         self.token = self.url.split("k=", 1)[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
@@ -169,3 +169,16 @@ class RunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetiredPageTest(unittest.TestCase):
+    def test_page_retired_api_kept(self):
+        be = ui.Backend(state.State(Path(tempfile.mkdtemp())))
+        srv, url = ui.serve(be)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(url)
+            self.assertEqual(cm.exception.code, 404)
+        finally:
+            srv.shutdown(); srv.server_close()

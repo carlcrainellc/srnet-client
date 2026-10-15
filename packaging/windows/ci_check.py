@@ -10,17 +10,24 @@ srnet = Path(os.environ["LOCALAPPDATA"]) / "srnet-client" / "bin" / "srnet.cmd"
 home = Path(tempfile.mkdtemp())
 env = dict(os.environ, SRNET_HOME=str(home))
 
-ui = subprocess.Popen(["cmd", "/c", str(srnet), "--home", str(home), "ui", "--no-browser"],
+ui = subprocess.Popen(["cmd", "/c", str(srnet), "--home", str(home), "ui", "--no-browser", "--port", "48930"],
                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 url = None
 for _ in range(120):
     line = ui.stdout.readline()
-    if "http://127.0.0.1:" in line:
-        url = line.split("srnet ui: ", 1)[1].strip(); break
+    if "srnet ui: http://127.0.0.1:" in line:
+        url = line.split("srnet ui: ", 1)[1].split()[0]; break
 assert url, "srnet ui did not print its URL"
-page = urllib.request.urlopen(url, timeout=10).read().decode()
-assert "Wallet / Top up" in page and "Exits" in page and "SNApps" in page
-print("PASS srnet ui", url.split("?")[0])
+page = None
+for _ in range(60):
+    try:
+        page = urllib.request.urlopen(url, timeout=5).read().decode(); break
+    except OSError:
+        time.sleep(1)
+assert page and 'data-b="exits"' in page and "Top up from a phone wallet" in page and "Check my setup" in page
+col = json.loads(urllib.request.urlopen(urllib.request.Request(url + "api/collections", headers={"X-Core": "1"}), timeout=10).read())
+assert col.get("wallet") is True, col
+print("PASS srnet ui (one app: SNApps + native Exits/Wallet + Check my setup)", url)
 kill(ui)
 
 # snapps: a local testbed config, then the installed launcher serves the shell page
