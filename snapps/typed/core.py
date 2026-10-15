@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 import mbfmt as F
 from . import joins as J
 from . import adapters, filecrypt as FC, htmlview, views
+from . import mail as M
 from .record import BOARD, KIND_TYPES, TESTNET_CHAINS, codec_for, make_record
 from .registry import RegistryError, TemplateManager
 from . import mail as MAIL
@@ -182,7 +183,7 @@ class Core:
             ent = J.get(cid)
             if ent is None or ent.get("source") == "config":
                 old = ent or {}
-                J[cid] = dict({"label": cid, "muted": False, "pinned": False, "read_seq": 0},
+                J[cid] = dict({"label": c.get("label") or cid, "muted": False, "pinned": False, "read_seq": 0},
                               **{k: old[k] for k in ("label", "muted", "pinned", "read_seq") if k in old},
                               id=cid, source="config", cfg=dict(c, id=cid))
                 if c.get("root_pin"):
@@ -235,8 +236,11 @@ class Core:
             raise J.LinkError("the host's root key doesn't match the key in this link: not joining")
         tk = f"{l['host']}/{l['kind']}/{l['name']}"
         trusted = self.prefs["trust"].get(tk)
-        joined = [c.id for c in self.colls.values()
-                  if self._trust_key(c.cfg) == tk]
+        if l["kind"] == "mail":
+            joined = ["mail"] if pr["url"] in self.mail.st["hosts"] else []
+        else:
+            joined = [c.id for c in self.colls.values()
+                      if self._trust_key(c.cfg) == tk]
         out = {"host": l["host"], "kind": l["kind"], "name": l["name"], "root": pr["root"],
                "url": pr["url"], "rules": pr["rules"], "pinned_by_link": bool(l["root"]),
                "first_seen": trusted is None, "already_joined": joined[:1],
@@ -255,6 +259,8 @@ class Core:
                             "collection: blocked. Review it and use re-trust if you expect the change.")
             if pv["already_joined"]:
                 return dict(pv, joined=True, id=pv["already_joined"][0])
+            if pv["kind"] == "mail":
+                return self._join_mail_host(pv)
             cid = self._new_id(pv["name"], pv["host"])
             cfg = {"id": cid, "name": pv["name"], "kind": pv["kind"], "hosts": [pv["url"]],
                    "root_pin": pv["root"]}
@@ -268,6 +274,21 @@ class Core:
             self.save()
         self.sync(cid)
         return dict(pv, joined=True, id=cid)
+
+    def _join_mail_host(self, pv):
+        """Directory/link Join for a mail host: add it to your mail hosts and register an inbox."""
+        hosts = list(self.mail.st["hosts"])
+        if len(hosts) >= M.MAX_HOSTS:
+            return dict(pv, joined=False, error=f"you already use {M.MAX_HOSTS} mail hosts: "
+                        "remove one on the Mail page first")
+        self.prefs["trust"].setdefault(f"{pv['host']}/mail/{pv['name']}", pv["root"])
+        self.mail.set_hosts(hosts + [pv["url"]])
+        self.save()
+        try:
+            reg = self.mail.register()
+        except Exception as e:  # host added; registration retried on the next Check mail
+            reg = {"error": str(e)}
+        return dict(pv, joined=True, id="mail", mail=True, register=reg)
 
     RETRUST_PHRASE = "trust the new key"
 
@@ -1022,11 +1043,13 @@ def _line(k, v):
 
 def main():
     ap = argparse.ArgumentParser(description="typed-SNApp client core")
-    ap.add_argument("--config", required=True)
+    ap.add_argument("--config", help="user client.json, layered on the shipped default-client.json")
+    ap.add_argument("--defaults", help="use this defaults file instead of the shipped one")
     ap.add_argument("--data", required=True)
     ap.add_argument("--port", type=int, default=48920)
     a = ap.parse_args()
-    core = Core(a.data, json.loads(Path(a.config).read_text()))
+    from .clientconfig import load as load_config
+    core = Core(a.data, load_config(a.config, a.defaults))
     core.sync()
     srv = serve(core, a.port)
     print(f"typed client: http://127.0.0.1:{srv.server_address[1]}/  (author {core.me[:12]}…)",

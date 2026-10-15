@@ -40,3 +40,18 @@ for _ in range(60):
 kill(sn)
 assert ok, "srnet snapps did not serve"
 print("PASS srnet snapps")
+
+# snapps with no --config: shipped defaults only (placeholders -> empty sidebar), served from the installed app
+home2 = Path(tempfile.mkdtemp())
+sn = subprocess.Popen(["cmd", "/c", str(srnet), "--home", str(home2), "snapps", "--port", "48932"],
+                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(env, SRNET_HOME=str(home2)))
+side = None
+for _ in range(60):
+    try:
+        req = urllib.request.Request("http://127.0.0.1:48932/api/sidebar", headers={"X-Core": "1"})
+        side = json.loads(urllib.request.urlopen(req, timeout=3).read()); break
+    except OSError:
+        time.sleep(1)
+kill(sn)
+assert side == {"groups": []}, f"srnet snapps without --config: {side}"
+print("PASS srnet snapps (shipped defaults, no --config)")

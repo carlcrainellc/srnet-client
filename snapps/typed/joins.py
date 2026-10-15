@@ -17,7 +17,7 @@ import mbfmt as F
 
 from .sync import http_json
 
-KINDS = ("board", "room", "wiki", "shop", "drop", "id", "directory")
+KINDS = ("board", "room", "wiki", "shop", "drop", "id", "directory", "mail")  # mail: a mail host, not a collection
 SESH_RE = re.compile(r"^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}\.sesh$")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -113,6 +113,8 @@ def offered(host: str) -> list[dict]:
 def probe(host: str, kind: str, name: str) -> dict:
     """Fetch the host's signed delegation for a collection. Verifies the signature against the
     root key *it names*; the caller decides whether that root is trusted (link pin / TOFU)."""
+    if kind == "mail":
+        return probe_mail(host, name)
     errors = []
     for url in candidates(host, kind, name):
         try:
@@ -130,3 +132,25 @@ def probe(host: str, kind: str, name: str) -> dict:
         except (LinkError, F.FormatError, OSError, ValueError, KeyError, TypeError) as e:
             errors.append(f"{url}: {e}")
     raise LinkError("host didn't verify: " + "; ".join(errors))
+
+
+def probe_mail(host: str, name: str) -> dict:
+    """A mail host joins by link too: /v1/mail/info must carry a delegation for <name> signed by
+    the root key it names (the hosting pack's `link` writes it). The caller checks that root."""
+    url = base_url(host)
+    try:
+        code, info = http_json(url + "/v1/mail/info")
+        env = (info or {}).get("delegation") or {}
+        d = env.get("delegation") or {}
+        if code != 200 or (info or {}).get("role") != "mail" or d.get("board") != name \
+                or not HEX64.match(str(d.get("root", ""))):
+            raise LinkError("this host publishes no signed mail delegation")
+        F.verify_delegation(env, d["root"], name)
+    except (LinkError, F.FormatError, OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        raise LinkError(f"mail host didn't verify: {url}: {e}")
+    lim = info.get("limits") or {}
+    rules = "mail host · new inboxes " + ("open" if lim.get("open_registration", True) else "closed")
+    if lim.get("ttl_default_s"):
+        rules += f" · mail kept {int(lim['ttl_default_s']) // 86400 or 1} day(s)"
+    return {"url": url, "root": d["root"], "host_key": d.get("host"), "expires": d.get("expires"),
+            "rules": rules}

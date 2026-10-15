@@ -60,5 +60,6 @@ case ":$PATH:" in *":$BIN:"*) ;; *) echo "  add $BIN to your PATH";; esac
 echo "  srnet key new      create your wallet (saved encrypted)"
 echo "  srnet doctor       check everything is ready"
 echo "  srnet ui           open the app in your browser"
+echo "  srnet snapps       open SNApps (lobby and directory come pre-joined; --config FILE adds your own)"
 [ "$(uname -s)" = "Darwin" ] && echo "  note: 'srnet connect' (routing traffic through an exit) is Linux-only for now."
 exit 0

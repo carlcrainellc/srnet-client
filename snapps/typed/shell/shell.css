@@ -32,3 +32,4 @@ main{flex:1;min-width:0}
 .m-row { padding: .4em; border-bottom: 1px solid #ddd; cursor: pointer; }
 .m-row.unread strong { font-weight: 800; }
 #m-view pre { white-space: pre-wrap; }
+#side .empty{padding:8px 10px;line-height:1.4}

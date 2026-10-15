@@ -89,10 +89,14 @@ async function joinFlow(link) {
     p.pinned_by_link ? "root key matches the key in the link" : "link carried no key: you'll trust this one from now on (first use)"];
   if (p.rules) lines.push("rules: " + p.rules);
   if (p.root_mismatch) return sheet("WARNING: root key changed", p.host, lines.concat(["", "You trusted a different key before: " + p.root_mismatch.pinned, "Join blocked."]), [["Close", async () => {}]]);
+  const isMail = p.kind === "mail";
+  if (isMail) lines[1] = "type: mail host (your inbox gets a copy here)";
+  if (p.already_joined.length && isMail) return sheet("Already your mail host", p.host, lines, [["Open Mail", async () => { location.href = "/mail"; }], ["Close", async () => {}]]);
   if (p.already_joined.length) return sheet("Already joined", p.name, lines, [["Open", async () => { await side(); const it = findItem(p.already_joined[0]); if (it) open(it); }], ["Close", async () => {}]]);
-  sheet("Join " + p.name + "?", "verified: signed by the root key below", lines,
-    [["Join", async () => { const r = await api("join", {link: p.link});
+  sheet(isMail ? "Use " + p.host + " as a mail host?" : "Join " + p.name + "?", "verified: signed by the root key below", lines,
+    [[isMail ? "Add mail host" : "Join", async () => { const r = await api("join", {link: p.link});
       if (!r.joined) { $("status").textContent = "join refused: " + (r.error || "?"); return; }
+      if (r.mail) { $("status").textContent = "mail host added"; location.href = "/mail"; return; }
       await side(); const it = findItem(r.id); if (it) open(it); }], ["Cancel", async () => {}]]);
 }
 let SIDE = {groups: []};
@@ -120,6 +124,8 @@ async function side() {
           [["Copy", async () => { try { await navigator.clipboard.writeText(r.link); $("status").textContent = "link copied"; } catch (e) { $("status").textContent = "copy failed: select the link text"; } }], ["Close", async () => {}]]); });
       act("Leave", async () => { if (!confirm("Leave " + i.label + "? Its cached copy is deleted.")) return; await api("leave", {c: i.name}); if (cur && cur.name === i.name) { show("home"); ribbon("home"); } side(); }).classList.add("danger");
       box.appendChild(row); box.appendChild(menu); }); });
+  if (!SIDE.groups.some((g) => g.items.length)) { const e = el("div", "Nothing joined yet. Paste an srnet:// link on Home, or use the Join buttons in a directory. Rooms, file drops and stores show up here once you join them.");
+    e.className = "muted empty"; e.id = "side-empty"; box.appendChild(e); }
 }
 async function onDraft(m) {
   const d = await api("draft", {c: cur.name, t: String(m.t), body: m.body || {}, refs: Array.isArray(m.refs) ? m.refs : []});

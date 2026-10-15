@@ -13,7 +13,7 @@
   srnet deliver            resend your last claim to the seller (buy does this automatically)
   srnet pay --vendor-id V --amount N  pay any SRNet seller from your SRNet balance
   srnet vendor --shop-key K  seller: bind a vendor id for SRNet-balance payments
-  srnet snapps --config F  typed SNApps client (boards, rooms, wiki, shop, drop, pages)
+  srnet snapps [--config F] typed SNApps client (boards, rooms, wiki, shop, drop, pages)
   srnet ui                 open the local web page (SNApps, Exits, Wallet / Top up)
 
 PAYMENT IS FINAL: once a lease starts the seller may take that hour; there is no buyer
@@ -617,8 +617,14 @@ def cmd_snapps(args, st: state.State) -> int:
         print(f"typed SNApps not found at {root}; set SRNET_SNAPPS_DIR", file=sys.stderr)
         return 2
     data = args.data or str(st.root / "snapps")
-    cmd = [sys.executable, "-m", "typed.core", "--config", str(Path(args.config).resolve()),
-           "--data", data, "--port", str(args.port)]
+    # shipped defaults (lobby + directory pre-joined, default mail host), then the user's config on top
+    user_cfg = Path(args.config) if args.config else st.root / "client.json"
+    cmd = [sys.executable, "-m", "typed.core", "--data", data, "--port", str(args.port)]
+    if args.config or user_cfg.exists():
+        if not user_cfg.exists():
+            print(f"config not found: {user_cfg}", file=sys.stderr)
+            return 2
+        cmd += ["--config", str(user_cfg.resolve())]
     return subprocess.call(cmd, cwd=str(root))
 
 
@@ -757,7 +763,8 @@ def main(argv=None) -> int:
     vd.add_argument("--contract"); vd.add_argument("--rpc"); vd.add_argument("--private-key")
 
     sn = sub.add_parser("snapps", help="start the typed-SNApp client on 127.0.0.1")
-    sn.add_argument("--config", required=True, help="client.json: pinned collections and template registry")
+    sn.add_argument("--config", help="your client.json, layered on the shipped defaults "
+                    "(default <home>/client.json if it exists)")
     sn.add_argument("--data", help="data dir (default <home>/snapps)")
     sn.add_argument("--port", type=int, default=48920)
 
