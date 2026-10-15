@@ -97,13 +97,22 @@ def c_ports():
     if not WIN:
         return ("WARN" if _listening(UI_PORT) else "PASS"), f"tcp {UI_PORT} {'in use' if _listening(UI_PORT) else 'free'}", ""
     out = _ps("Get-NetTCPConnection -State Listen -LocalPort 48920,1190 -ErrorAction SilentlyContinue | "
-              "ForEach-Object { \"tcp:$($_.LocalPort):$((Get-Process -Id $_.OwningProcess).ProcessName)\" }; "
+              "ForEach-Object { \"tcp:$($_.LocalAddress):$($_.LocalPort):$((Get-Process -Id $_.OwningProcess).ProcessName)\" }; "
               "Get-NetUDPEndpoint -LocalPort 53,1191 -ErrorAction SilentlyContinue | "
-              "ForEach-Object { \"udp:$($_.LocalPort):$((Get-Process -Id $_.OwningProcess).ProcessName)\" }")
-    bad = [x for x in out.split() if x.count(":") == 2 and x.rsplit(":", 1)[1].lower() not in ("python", "pythonw", "session-router")]
+              "ForEach-Object { \"udp:$($_.LocalAddress):$($_.LocalPort):$((Get-Process -Id $_.OwningProcess).ProcessName)\" }")
+    fail, warn = [], []
+    for x in sorted(set(out.split())):
+        proto, rest = x.split(":", 1)
+        addr, port, name = rest.rsplit(":", 2)
+        if name.lower() in ("python", "pythonw", "session-router"):
+            continue
+        # only a bind on loopback or the wildcard collides with the router (127.0.0.1) / client
+        (fail if addr in ("127.0.0.1", "0.0.0.0", "::", "::1") else warn).append(f"{proto} {addr}:{port} {name}")
     d = " ".join(sorted(set(out.split()))) or "all free"
-    if bad:
-        return "FAIL", d, "another program holds " + ", ".join(bad) + "; close it (Task Manager) or stop the other DNS/VPN service"
+    if fail:
+        return "FAIL", d, "another program holds " + ", ".join(fail) + "; close it (Task Manager) or stop the other DNS/VPN service"
+    if warn:
+        return "WARN", d, "other programs use " + ", ".join(warn) + " on other addresses; fine unless .sesh lookups fail"
     return "PASS", d, ""
 
 
@@ -146,16 +155,20 @@ def c_demo():
 
 
 def c_clock():
-    try:
-        req = urllib.request.Request("https://www.microsoft.com/", method="HEAD")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            remote = email.utils.parsedate_to_datetime(r.headers["Date"])
-        skew = abs((_dt.datetime.now(_dt.timezone.utc) - remote).total_seconds())
-        if skew > 300:
-            return "FAIL", f"clock off by {skew:.0f}s", "Settings > Time & language > Sync now (signed records and the router need a correct clock)"
-        return ("WARN" if skew > 60 else "PASS"), f"clock skew {skew:.0f}s", "Settings > Time & language > Sync now" if skew > 60 else ""
-    except Exception as e:  # noqa: BLE001
-        return "WARN", f"couldn't compare the clock ({str(e)[:60]})", ""
+    last = None
+    for url in ("https://www.cloudflare.com/", "https://www.google.com/", "https://www.microsoft.com/"):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=6) as r:
+                remote = email.utils.parsedate_to_datetime(r.headers["Date"])
+            break
+        except Exception as e:  # noqa: BLE001
+            last = e
+    else:
+        return "WARN", f"couldn't compare the clock ({str(last)[:60]})", "check Settings > Time & language > Sync now"
+    skew = abs((_dt.datetime.now(_dt.timezone.utc) - remote).total_seconds())
+    if skew > 300:
+        return "FAIL", f"clock off by {skew:.0f}s", "Settings > Time & language > Sync now (signed records and the router need a correct clock)"
+    return ("WARN" if skew > 60 else "PASS"), f"clock skew {skew:.0f}s", "Settings > Time & language > Sync now" if skew > 60 else ""
 
 
 def c_disk():
