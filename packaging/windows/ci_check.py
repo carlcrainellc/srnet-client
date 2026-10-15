@@ -41,7 +41,7 @@ kill(sn)
 assert ok, "srnet snapps did not serve"
 print("PASS srnet snapps")
 
-# snapps with no --config: shipped defaults only (placeholders -> empty sidebar), served from the installed app
+# snapps with no --config: the shipped defaults pre-join lobby + directory (CI can't reach .sesh; they just show errors)
 home2 = Path(tempfile.mkdtemp())
 sn = subprocess.Popen(["cmd", "/c", str(srnet), "--home", str(home2), "snapps", "--port", "48932"],
                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(env, SRNET_HOME=str(home2)))
@@ -53,5 +53,6 @@ for _ in range(60):
     except OSError:
         time.sleep(1)
 kill(sn)
-assert side == {"groups": []}, f"srnet snapps without --config: {side}"
-print("PASS srnet snapps (shipped defaults, no --config)")
+ids = sorted(i["id"] for g in (side or {}).get("groups", []) for i in g["items"])
+assert ids == ["directory", "lobby"], f"srnet snapps without --config: {side}"
+print("PASS srnet snapps (shipped defaults pre-join lobby + directory, no --config)")

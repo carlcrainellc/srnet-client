@@ -35,7 +35,8 @@ def main(argv=None):
     mail = f"http://127.0.0.1:{a.mail_port}"
     cfgp = os.path.join(d, "client.json")
     with open(cfgp, "w") as f:
-        json.dump({"collections": [], "mail": {"hosts": [mail], "attach_drop": "files"}}, f, indent=2)
+        json.dump({"collections": [{"id": "lobby", "disabled": True}, {"id": "directory", "disabled": True}],  # loopback only: hide the shipped demo lobby/directory
+                   "mail": {"hosts": [mail], "attach_drop": "files"}}, f, indent=2)
     info = {"room_link": links["lobby"], "files_link": links["files"], "mail_host": mail,
             "client_config": cfgp, "root_pin": pin}
     with open(os.path.join(d, "links.json"), "w") as f:

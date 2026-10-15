@@ -3,11 +3,11 @@
   "defaults_version": 1,
   "collections": [
     {"id": "lobby", "label": "Lobby", "kind": "room", "name": "lobby",
-     "hosts": ["http://REPLACE-ME-LOBBY-HOST.sesh/c/lobby"],
-     "root_pin": "REPLACE-ME-LOBBY-ROOT-KEY-64-HEX"},
+     "hosts": ["http://srnet7fqaajaqb6u7ho56znknysg5ime6kfbaymaaih4ba3q1ndo.sesh/c/lobby"],
+     "root_pin": "651eb5300d57102e900b0c9d4c9b9c6cf437f35dbeca80940dceedc51dfb128b"},
     {"id": "directory", "label": "Directory", "kind": "directory", "name": "directory",
-     "hosts": ["http://REPLACE-ME-DIRECTORY-HOST.sesh/c/directory"],
-     "root_pin": "REPLACE-ME-DIRECTORY-ROOT-KEY-64-HEX"}
+     "hosts": ["http://srnet7fqaajaqb6u7ho56znknysg5ime6kfbaymaaih4ba3q1ndo.sesh/c/directory"],
+     "root_pin": "960e6ceb53b5a9ac2b90c3b2652e80f329a1a0aa25fd63163c65064e8d938dfa"}
   ],
-  "mail": {"hosts": ["http://REPLACE-ME-MAIL-HOST.sesh"]}
+  "mail": {"hosts": ["http://srnet7fqaajaqb6u7ho56znknysg5ime6kfbaymaaih4ba3q1ndo.sesh"]}
 }

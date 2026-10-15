@@ -3,6 +3,7 @@ user config layered on top; leaving a pre-joined collection stays left; director
 file drops, stores and mail hosts; `srnet snapps` without --config."""
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -23,26 +24,47 @@ from typed.sync import submit  # noqa: E402
 LOW = {k: {"pow_bits": 4, "new_key_pow_bits": 6} for k in ("room", "directory", "id", "drop", "shop")}
 
 
+# an unconfigured build: the shipped layout with every value still a placeholder
+PLACEHOLDERS = {"collections": [
+    {"id": "lobby", "label": "Lobby", "kind": "room", "name": "lobby",
+     "hosts": ["http://REPLACE-ME-LOBBY-HOST.sesh/c/lobby"], "root_pin": "REPLACE-ME-LOBBY-ROOT-KEY-64-HEX"},
+    {"id": "directory", "label": "Directory", "kind": "directory", "name": "directory",
+     "hosts": ["http://REPLACE-ME-DIRECTORY-HOST.sesh/c/directory"], "root_pin": "REPLACE-ME-DIRECTORY-ROOT-KEY-64-HEX"}],
+    "mail": {"hosts": ["http://REPLACE-ME-MAIL-HOST.sesh"]}}
+
+
+def placeholder_file():
+    p = Path(tempfile.mkdtemp(prefix="dflt-ph-")) / "defaults.json"
+    p.write_text(json.dumps(PLACEHOLDERS))
+    return p
+
+
+SESH = re.compile(r"^http://[ybndrfg8ejkmcpqxot1uwisza345h769]{52}\.sesh(/c/[a-z]+)?$")
+
+
 class Shipped(unittest.TestCase):
-    def test_shipped_file_has_slots_with_placeholders(self):
+    def test_shipped_file_has_real_pinned_slots(self):
         raw = json.loads(CC.DEFAULTS.read_text())
         ids = {c["id"]: c for c in raw["collections"]}
         self.assertEqual(set(ids), {"lobby", "directory"})
         self.assertEqual(ids["lobby"]["kind"], "room")
         self.assertEqual(ids["directory"]["kind"], "directory")
         for c in ids.values():
-            self.assertIn(CC.PLACEHOLDER, c["root_pin"])
-            self.assertIn(CC.PLACEHOLDER, c["hosts"][0])
-        self.assertIn(CC.PLACEHOLDER, raw["mail"]["hosts"][0])
-
-    def test_placeholders_give_empty_config(self):
+            self.assertRegex(c["root_pin"], CC.HEX64)
+            self.assertRegex(c["hosts"][0], SESH)
+            self.assertTrue(c["hosts"][0].endswith("/c/" + c["name"]))
+        self.assertRegex(raw["mail"]["hosts"][0], SESH)
         cfg = CC.load()
-        self.assertEqual(cfg["collections"], [])
-        self.assertEqual(cfg["mail"]["hosts"], [])
+        self.assertEqual([c["id"] for c in cfg["collections"]], ["lobby", "directory"])
         self.assertNotIn("_about", cfg)
 
+    def test_placeholders_give_empty_config(self):
+        cfg = CC.load(None, placeholder_file())
+        self.assertEqual(cfg["collections"], [])
+        self.assertEqual(cfg["mail"]["hosts"], [])
+
     def test_unconfigured_core_starts_empty(self):
-        c = Core(tempfile.mkdtemp(prefix="dflt-empty-"), CC.load())
+        c = Core(tempfile.mkdtemp(prefix="dflt-empty-"), CC.load(None, placeholder_file()))
         self.assertEqual(c.sidebar(), {"groups": []})
         self.assertEqual(c.mail.summary()["hosts"], [])
         c.sync()  # nothing to sync, no errors
@@ -217,7 +239,7 @@ class DefaultsUI(Fixture, unittest.TestCase):
     def test_empty_sidebar_is_friendly(self):
         d = self.tmp / "c" / "ui-empty"
         d.mkdir(parents=True, exist_ok=True)
-        pg = self.browse(Core(str(d), CC.load()), "/")
+        pg = self.browse(Core(str(d), CC.load(None, placeholder_file())), "/")
         pg.wait_for_selector("#side-empty", timeout=20000)
         self.assertIn("Nothing joined yet", pg.inner_text("#side-empty"))
 
