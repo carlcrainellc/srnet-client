@@ -276,12 +276,12 @@ class CliSnapps(unittest.TestCase):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "client-cli"))
         from srnet import cli
         seen = {}
-        orig = cli.subprocess.call
-        cli.subprocess.call = lambda cmd, cwd=None: seen.setdefault("cmd", cmd) and 0
+        orig = cli._run_child
+        cli._run_child = lambda cmd, cwd=None: seen.setdefault("cmd", cmd) and 0
         try:
-            rc = cli.main(["--home", str(home), "snapps", *extra])
+            rc = cli.main(["--home", str(home), "snapps", "--port", "48999", *extra])
         finally:
-            cli.subprocess.call = orig
+            cli._run_child = orig
         return rc, seen.get("cmd")
 
     def test_config_is_optional(self):

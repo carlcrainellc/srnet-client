@@ -636,8 +636,13 @@ def cmd_snapps(args, st: state.State) -> int:
             print(f"config not found: {user_cfg}", file=sys.stderr)
             return 2
         cmd += ["--config", str(user_cfg.resolve())]
-    child = subprocess.Popen(cmd, cwd=str(root))
-    if os.name != "nt":  # SIGTERM to `srnet ui` must not orphan the core (it would keep the port)
+    return _run_child(cmd, str(root))
+
+
+def _run_child(cmd, cwd) -> int:
+    """Run the core; SIGTERM / Ctrl-C to `srnet ui` must not orphan it (it would keep the port)."""
+    child = subprocess.Popen(cmd, cwd=cwd)
+    if os.name != "nt":
         import signal
         signal.signal(signal.SIGTERM, lambda *a: (child.terminate(), sys.exit(143)))
     try:
