@@ -333,7 +333,7 @@ DROP_MODES = ("plain", "link", "gated")
 # Encrypted modes: sha256/size describe the ciphertext; name and MIME type are inside it.
 # refs[0], if present, is the previous version of this file (same author).
 DROP_ITEM = TypeSpec("drop.item", 1, {
-    "sha256": hexhash(required=True), "size": integer(1, 5 * 1024 * 1024),
+    "sha256": hexhash(required=True), "size": integer(1, 300 * 1024 * 1024),  # host policy max_file_bytes applies
     "mime": pattern(r"[a-z]+/[a-z0-9.+-]{1,60}", required=False, what="mime"),
     "name": text(128, required=False, multiline=False), "note": text(500, required=False),
     "mode": pattern(r"plain|link|gated", required=False, what="mode"),

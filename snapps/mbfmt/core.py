@@ -281,7 +281,7 @@ class CheckpointPin:
 MOD_DOMAIN = "srnet-msgboard-mod/v1"
 DELETE_DOMAIN = "srnet-msgboard-delete/v1"
 POLICY_DOMAIN = "srnet-msgboard-policy/v1"
-MOD_ACTIONS = {"hide", "unhide"}
+MOD_ACTIONS = {"hide", "unhide", "remove", "pin", "unpin"}  # remove/pin: posts only
 MOD_TARGETS = {"post", "author"}
 MAX_DELETE_TARGETS = 50
 _ID_RE = re.compile(f"^[{_ZB}]{{26}}$")
@@ -306,6 +306,8 @@ def _check_mod(r):
         raise FormatError("mod fields")
     if r["action"] not in MOD_ACTIONS or r["target_type"] not in MOD_TARGETS:
         raise FormatError("mod action/target_type")
+    if r["action"] in ("remove", "pin", "unpin") and r["target_type"] != "post":
+        raise FormatError(f"{r['action']} targets a post")
     ok = _ID_RE.match(r["target"]) if r["target_type"] == "post" else HEX64.match(r["target"])
     if not isinstance(r["target"], str) or not ok:
         raise FormatError("mod target")

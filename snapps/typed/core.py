@@ -24,6 +24,7 @@ import secrets
 import shutil
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -71,7 +72,19 @@ class Coll:
         d = Path(core.dir) / "c" / self.id
         d.mkdir(parents=True, exist_ok=True)
         self.store = Store(str(d / "cache.sqlite3"))
+        self.store.on_redact = self._on_redact
         self.pin = F.CheckpointPin(*self.store.head())
+
+    def _on_redact(self, pid, env, tomb):
+        """A host remove of a file also deletes our cached copy of its bytes."""
+        if tomb.get("by") != "remove" or not isinstance(env, dict):
+            return
+        from .host import env_body
+        sha = env_body(env).get("sha256")
+        if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha):
+            p = Path(self.core.dir) / "blobs" / sha
+            if p.exists():
+                p.unlink()
 
     def sync(self):
         if self.kind == "exit":
@@ -445,7 +458,19 @@ class Core:
         else:
             v = (views.drop_view(items, c.policy or {}, self.me, self.enc_pub) if c.kind == "drop"
                  else views.VIEWS[c.kind](items, c.policy or {}))
-        return dict(base, view=v, hidden=hidden)
+        # host removals: shown as "Removed by host: <reason>"; never revealable
+        removed = [{"id": it["id"], "seq": it["seq"], "reason": it.get("reason", "")}
+                   for it in items if it["t"] == "tombstone" and it.get("by") == "remove"]
+        extra = {}
+        if c.kind in ("room", "board"):
+            from .host import active_pins
+            pol = c.policy or {}
+            extra["header"] = {"description": pol.get("description") or "",
+                               "rules": pol.get("rules") or ""}
+            pins = active_pins(c.store.records_since(0, 1 << 30))
+            rows = v.get("lines") or v.get("posts") or []
+            extra["pinned"] = [r for p in pins for r in rows if r["id"] == p]
+        return dict(base, view=v, hidden=hidden, removed=removed, **extra)
 
     # ---- drafts: template proposes, core validates, user confirms, core signs ----
     def draft(self, name, t, body, refs):
@@ -621,9 +646,53 @@ class Core:
         raise F.FormatError("no such order")
 
     # ---- file drop: encrypted by default; the host only ever sees ciphertext ----
+    def max_file_bytes(self, c) -> int:
+        """The drop's limit from its checkpoint-signed policy (older hosts: 4 MiB)."""
+        v = (c.policy or {}).get("max_file_bytes")
+        return int(v) if isinstance(v, int) and v > 0 else FC.LEGACY_MAX_FILE
+
+    UP_CHUNK = 1 << 20
+
+    def _put_chunked(self, c, host, data: bytes, h: str):
+        """Signed, chunked, resumable upload.  Returns True, False (refused) or None (no
+        /v1/upload on this host: an older host).  Re-running after an interruption asks the
+        host how many bytes it already has and continues from there."""
+        from .hub import sign_upload
+        code, r = http_json(host + "/v1/upload", sign_upload(self.key, c.name, h, len(data)), timeout=30)
+        if code == 404 and "error" in r and r.get("error") == "not found":
+            return None
+        if code != 200 or not r.get("ok"):
+            raise FC.CryptoError(r.get("error") or f"upload refused ({code})")
+        have = int(r.get("have", 0))
+        step = min(int(r.get("chunk") or self.UP_CHUNK), self.UP_CHUNK)
+        while not r.get("done"):
+            req = urllib.request.Request(f"{host}/v1/upload/{h}?off={have}", data=data[have:have + step],
+                                         headers={"Content-Type": "application/octet-stream"})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    r = json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                r = json.loads(e.read() or b"{}")
+                if e.code == 409 and "have" in r:  # host is elsewhere: continue from there
+                    have, r = int(r["have"]), {}
+                    continue
+                raise FC.CryptoError(r.get("error") or f"chunk refused ({e.code})")
+            have = int(r.get("have", have))
+        return True
+
     def _put_blob(self, c, data: bytes) -> bool:
         h = hashlib.sha256(data).hexdigest()
+        refused = None
         for host in c.hosts:
+            try:
+                ok = self._put_chunked(c, host, data, h)
+                if ok:
+                    return True
+            except FC.CryptoError as e:
+                refused = e
+                continue
+            except OSError:
+                continue
             try:
                 req = urllib.request.Request(host + "/v1/blob", data=data,
                                              headers={"Content-Type": "application/octet-stream"})
@@ -632,6 +701,8 @@ class Core:
                         return True
             except OSError:
                 continue
+        if refused:
+            raise refused
         return False
 
     def mail_attach(self, data: bytes, filename: str, mime: str) -> str:
@@ -642,9 +713,16 @@ class Core:
             raise MAIL.MailError("join a file drop first: attachments are stored there, encrypted")
         pref = (self.config.get("mail") or {}).get("attach_drop")
         drops.sort(key=lambda c: c.name != pref)
-        blob, key = FC.encrypt(data, filename, mime)
         for c in drops:
-            if self._put_blob(c, blob):
+            try:
+                blob, key = FC.encrypt(data, filename, mime, max_plain=self.max_file_bytes(c))
+            except FC.CryptoError:
+                continue
+            try:
+                ok = self._put_blob(c, blob)
+            except FC.CryptoError:
+                continue
+            if ok:
                 return FC.link(c.hosts[0], hashlib.sha256(blob).hexdigest(), key)
         raise MAIL.MailError("no file-drop host took the attachment")
 
@@ -669,6 +747,10 @@ class Core:
         c = self._drop(name)
         if mode not in ("gated", "link", "plain"):
             raise F.FormatError("mode must be gated, link or plain")
+        lim = self.max_file_bytes(c)
+        if len(data) > lim:  # refused before anything is sent
+            return {"ok": False, "error": f"file too large for this drop (max {lim} bytes)",
+                    "max_file_bytes": lim}
         if mode == "plain":
             if not self._put_blob(c, data):
                 return {"ok": False, "error": "no host took the blob"}

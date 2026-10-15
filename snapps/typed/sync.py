@@ -3,8 +3,8 @@
 sync_once, for each host in order until one verifies:
   delegation (root pin) -> host key -> checkpoint (sig, expiry, rollback/equivocation)
   -> /log since our cursor up to checkpoint.seq: each entry's post signature + content id,
-     seq continuity and chain link (tombstones carry a signed author delete record or a
-     retention marker; links cover ids only, so the chain still verifies)
+     seq continuity and chain link (tombstones carry a signed author delete record, a
+     host-signed remove record or a retention marker; links cover ids only, so the chain still verifies)
   -> final head == checkpoint.head
   -> /records since our record cursor up to checkpoint.rseq, each signature-checked
   -> policy matches checkpoint.policy hash.
@@ -44,9 +44,16 @@ def http_json(url: str, data: dict | None = None, timeout=HTTP_TIMEOUT):
             return e.code, {"error": str(e)}
 
 
-def check_tomb(pid: str, tomb: dict, board: str) -> dict:
+def check_tomb(pid: str, tomb: dict, board: str, host_pub: str | None = None) -> dict:
     if not isinstance(tomb, dict):
         raise SyncError("bad tombstone")
+    if tomb.get("by") == "remove":
+        if host_pub is None:
+            raise SyncError("remove tombstone needs the host key")
+        m = F.verify_mod(tomb.get("record"), host_pub, board)
+        if m["action"] != "remove" or m["target_type"] != "post" or m["target"] != pid:
+            raise SyncError("tombstone remove record does not cover this post")
+        return {"by": "remove", "record": tomb["record"]}
     if tomb.get("by") == "delete":
         r = F.verify_delete(tomb.get("record"), board)
         if pid not in r["targets"]:
@@ -57,7 +64,7 @@ def check_tomb(pid: str, tomb: dict, board: str) -> dict:
     raise SyncError("unknown tombstone")
 
 
-def verify_segment(entries, start_seq, start_head, board, codec=BOARD):
+def verify_segment(entries, start_seq, start_head, board, codec=BOARD, host_pub=None):
     """Returns (seq, head, [(entry, meta|None)])."""
     seq, head, out = start_seq, start_head, []
     for e in entries:
@@ -65,7 +72,7 @@ def verify_segment(entries, start_seq, start_head, board, codec=BOARD):
         if "tomb" in e:
             if not isinstance(pid, str):
                 raise SyncError("tomb id")
-            ent, meta = {"tomb": check_tomb(pid, e["tomb"], board)}, None
+            ent, meta = {"tomb": check_tomb(pid, e["tomb"], board, host_pub)}, None
         else:
             meta = codec.verify(e["env"], board)
             pid = meta.id
@@ -107,7 +114,8 @@ def verify_records(recs, start_rseq, host_pub, board):
 
 
 def apply_record(store, r) -> None:
-    """Store a verified record; author deletes also redact our local copy (author must match)."""
+    """Store a verified record; author deletes also redact our local copy (author must match);
+    host removes (already verified against the delegated host key) always redact it."""
     if store.add_record(r["kind"], r["rec"], r["rid"], r["rseq"]) is None:
         return
     if r["kind"] == "delete":
@@ -115,6 +123,8 @@ def apply_record(store, r) -> None:
         for pid in d["targets"]:
             if store.author_of(pid) == d["author"]:
                 store.redact(pid, {"by": "delete", "record": r["rec"]})
+    elif r["kind"] == "mod" and r["rec"]["mod"]["action"] == "remove":
+        store.redact(r["rec"]["mod"]["target"], {"by": "remove", "record": r["rec"]})
 
 
 def accept_batch(store, pin, root_pin, board, delegation, cpe, fetch_entries, fetch_records,
@@ -133,7 +143,7 @@ def accept_batch(store, pin, root_pin, board, delegation, cpe, fetch_entries, fe
         ents = [e for e in fetch_entries(seq) if e.get("seq", 0) <= cp["seq"]]
         if not ents:
             raise SyncError("log shorter than checkpoint")
-        seq, head, out = verify_segment(ents, seq, head, board, codec)
+        seq, head, out = verify_segment(ents, seq, head, board, codec, host_pub)
         new += out
     if head != cp["head"]:
         raise SyncError("chain head does not match signed checkpoint")

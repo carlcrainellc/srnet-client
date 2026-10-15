@@ -75,6 +75,7 @@ class Mirror:
         i = {"v": 1, "board": self.board, "role": "mirror", "seq": seq,
              "rseq": self.store.rhead(), "last": self.last}
         if self.policy:
+            i["policy"] = F.policy_hash(self.policy)
             i.update(pow_bits=self.policy["pow_bits"],
                      new_key_pow_bits=self.policy["new_key_pow_bits"])
         return i

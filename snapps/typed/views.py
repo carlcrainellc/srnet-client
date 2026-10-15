@@ -14,8 +14,10 @@ def items_from_store(store, codec) -> list[dict]:
     out = []
     for e in store.since(0, 1 << 30):
         if "env" not in e:
-            out.append({"id": e["id"], "seq": e["seq"], "t": "tombstone",
-                        "by": e["tomb"].get("by")})
+            it = {"id": e["id"], "seq": e["seq"], "t": "tombstone", "by": e["tomb"].get("by")}
+            if it["by"] == "remove":
+                it["reason"] = ((e["tomb"].get("record") or {}).get("mod") or {}).get("reason", "")
+            out.append(it)
             continue
         m = codec.verify(e["env"], None)  # already verified on entry; re-derive fields
         out.append({"id": m.id, "seq": e["seq"], "t": m.t, "author": m.author, "ts": m.ts,
@@ -270,6 +272,12 @@ def host_rules(host, meta) -> str | None:
     pol = host.policy
     if meta.t in ("shop.listing", "shop.withdraw") and meta.author not in pol.get("sellers", []):
         return "only the store's seller keys may list or withdraw"
+    if meta.t == "drop.item" and pol.get("max_file_bytes"):
+        from .filecrypt import max_cipher_len
+        lim = pol["max_file_bytes"] if (meta.body.get("mode") or "plain") == "plain" \
+            else max_cipher_len(pol["max_file_bytes"])
+        if meta.body["size"] > lim:
+            return f"file too large for this drop (max {pol['max_file_bytes']} bytes)"
     if meta.t in ("wiki.protect", "room.topic") and meta.author not in pol.get("admins", []):
         return f"{meta.t} needs an admin key"
     if meta.t == "shop.listing":

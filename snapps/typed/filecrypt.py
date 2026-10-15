@@ -29,7 +29,9 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 MAGIC = b"SRF1"
 CHUNK = 64 * 1024
 TAG = 16
-MAX_PLAIN = 4 * 1024 * 1024          # largest file accepted for a drop
+MAX_PLAIN = 256 * 1024 * 1024        # protocol ceiling; each host sets its own max_file_bytes
+DEFAULT_MAX_FILE = 25 * 1024 * 1024  # host policy default (max_file_bytes)
+LEGACY_MAX_FILE = 4 * 1024 * 1024    # hosts that advertise no limit (older host packs)
 MIN_BUCKET = 4096
 WRAP_INFO = b"srnet-typed/file-wrap/v1"
 XKEY_INFO = b"srnet-typed/x25519/v1"
@@ -55,15 +57,18 @@ def _nonce(i: int, last: bool) -> bytes:
     return i.to_bytes(11, "big") + (b"\x01" if last else b"\x00")
 
 
-def max_cipher_len() -> int:
-    p = bucket(MAX_PLAIN + 1024)
+def max_cipher_len(max_plain: int | None = None) -> int:
+    """Largest ciphertext for a file of at most max_plain bytes (default: protocol ceiling)."""
+    p = bucket((MAX_PLAIN if max_plain is None else max_plain) + 1024)
     return 8 + p + (p // CHUNK + 1) * TAG
 
 
-def encrypt(data: bytes, name: str, mime: str, key: bytes | None = None) -> tuple[bytes, bytes]:
+def encrypt(data: bytes, name: str, mime: str, key: bytes | None = None,
+            max_plain: int | None = None) -> tuple[bytes, bytes]:
     """Returns (ciphertext blob, 32-byte file key)."""
-    if len(data) > MAX_PLAIN:
-        raise CryptoError(f"file too large (max {MAX_PLAIN} bytes)")
+    lim = MAX_PLAIN if max_plain is None else min(max_plain, MAX_PLAIN)
+    if len(data) > lim:
+        raise CryptoError(f"file too large (max {lim} bytes)")
     key = key or os.urandom(32)
     meta = json.dumps({"name": name, "mime": mime, "size": len(data)}, separators=(",", ":")).encode()
     plain = struct.pack(">I", len(meta)) + meta + data

@@ -80,6 +80,8 @@ def make_handler(resolve):
             node, sub = resolve(u.path)
             if node is None:
                 return self._send(404, {"error": "not found"})
+            if sub.startswith("/v1/upload/") and getattr(node, "blobs", None):
+                return self._send(*node.blobs.status(sub.rsplit("/", 1)[1]))
             if sub.startswith("/v1/blob/") and getattr(node, "blobs", None):
                 b = node.blobs.get(sub.rsplit("/", 1)[1])
                 if b is None:
@@ -100,6 +102,24 @@ def make_handler(resolve):
                 if n <= 0 or n > node.blobs.max_bytes:
                     return self._send(413, {"ok": False, "error": "size"})
                 return self._send(*node.blobs.put(self.rfile.read(n)))
+            if sub == "/v1/upload" and getattr(node, "blobs", None):
+                if n <= 0 or n > MAX_POST:
+                    return self._send(413, {"ok": False, "error": "size"})
+                try:
+                    env = json.loads(self.rfile.read(n))
+                except ValueError:
+                    return self._send(400, {"ok": False, "error": "bad json"})
+                return self._send(*node.blobs.start(env, node.clock()))
+            if sub.startswith("/v1/upload/") and getattr(node, "blobs", None):
+                from .hub import UP_CHUNK
+                if n < 0 or n > UP_CHUNK:
+                    return self._send(413, {"ok": False, "error": "chunk size"})
+                try:
+                    off = int(parse_qs(urlparse(self.path).query).get("off", ["-1"])[0])
+                except ValueError:
+                    return self._send(400, {"ok": False, "error": "offset"})
+                return self._send(*node.blobs.chunk(sub.rsplit("/", 1)[1], off,
+                                                    self.rfile.read(n)))
             routes = {"/v1/submit": (node.submit, MAX_POST), "/v1/delete": (node.delete, MAX_POST)}
             if hasattr(node, "publish"):
                 routes["/v1/publish"] = (node.publish, MAX_PUBLISH)

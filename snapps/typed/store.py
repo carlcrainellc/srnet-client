@@ -57,6 +57,9 @@ class Store:
         self.db = _LockedConn(sqlite3.connect(path, check_same_thread=False, isolation_level=None),
                               self.lock)
         self.db.execute("PRAGMA journal_mode=WAL")
+        # removed text must not linger in freed pages; redact() also checkpoints the WAL
+        self.db.execute("PRAGMA secure_delete=ON")
+        self.on_redact = None  # callback(pid, env_before, tomb): e.g. delete a removed blob
         self.db.execute("""CREATE TABLE IF NOT EXISTS log(
             seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, author TEXT NOT NULL,
             reply_to TEXT, ts INTEGER NOT NULL, env TEXT NOT NULL, link TEXT NOT NULL)""")
@@ -113,8 +116,15 @@ class Store:
 
     def redact(self, pid: str, tomb: dict) -> bool:
         with self.lock:
+            r = self.db.execute("SELECT env FROM log WHERE id=? AND tomb IS NULL", (pid,)).fetchone()
+            if r is None:
+                return False
             c = self.db.execute("UPDATE log SET env='null', tomb=? WHERE id=? AND tomb IS NULL",
                                 (json.dumps(tomb), pid))
+            if tomb.get("by") == "remove":  # host removal: wipe old copies out of the WAL now
+                self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            if c.rowcount and self.on_redact:
+                self.on_redact(pid, json.loads(r[0]), tomb)
             return c.rowcount > 0
 
     def _rows(self, q, args):

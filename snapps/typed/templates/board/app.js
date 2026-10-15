@@ -9,7 +9,7 @@ function compose(r) {
   r.appendChild(box);
 }
 function render(v) {
-  const r = tk.root(); r.appendChild(tk.el("h2", null, "Board · " + v.collection)); r.appendChild(tk.status(v));
+  const r = tk.root(); r.appendChild(tk.el("h2", null, "Board · " + v.collection)); r.appendChild(tk.status(v)); tk.header(r, v);
   compose(r);
   for (const p of v.view.posts || []) {
     const d = tk.el("div", "item");
@@ -20,5 +20,6 @@ function render(v) {
     else { d.appendChild(tk.btn(p.followed ? "Unfollow" : "Follow", () => tk.act(p.followed ? "unfollow" : "follow", p.author))); d.appendChild(tk.btn("Mute", () => tk.act("mute", p.author))); }
     r.appendChild(d);
   }
+  tk.removed(r, v);
 }
 tk.onView(render);

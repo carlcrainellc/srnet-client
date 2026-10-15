@@ -21,5 +21,6 @@ function render(v) {
     }
     r.appendChild(d);
   }
+  tk.removed(r, v);
 }
 tk.onView(render);

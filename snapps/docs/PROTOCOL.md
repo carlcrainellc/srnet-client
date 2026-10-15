@@ -28,7 +28,7 @@ Mirrors serve the same GET API with the primary's own signed checkpoint and dele
 
 ## Phase 1 additions
 - Checkpoint gains `policy` (SHA-256 of canonical(`srnet-msgboard-policy/v1`, policy)) and `rseq` (record count).
-- Records (`GET /v1/records?since=N`): `mod` = host-signed `{v,board,host,action:hide|unhide,target_type:post|author,target,reason,ts}`
+- Records (`GET /v1/records?since=N`): `mod` = host-signed `{v,board,host,action:hide|unhide|remove|pin|unpin,target_type:post|author,target,reason,ts}` (`remove`, `pin`, `unpin` take `target_type:post` only)
   (domain `srnet-msgboard-mod/v1`); `delete` = author-signed `{v,board,author,targets[≤50],ts}` (domain `srnet-msgboard-delete/v1`). `rid` = first 32 hex of SHA-256 of canonical bytes.
 - Tombstone entries `{seq,id,link,tomb:{by:"delete",record}|{by:"retention"}}`; links cover ids only, so chains still verify.
 - `POST /v1/delete`; `POST /v1/publish` (mirror only: `{delegation, checkpoint, policy, entries, records}`).
@@ -46,7 +46,8 @@ ciphertext, addressed by its SHA-256.
 (per version). Chunk nonce = 11-byte big-endian chunk index + 1 byte (`1` on the last chunk),
 AAD = the 8-byte header, so chunks can't be reordered, dropped, truncated or extended.
 Plaintext = `u32 meta_len | meta | file | zero padding`, `meta = {"name","mime","size"}`, padded
-to the next power of two (at least 4 KiB). The host learns only the size bucket. Max file 4 MiB.
+to the next power of two (at least 4 KiB). The host learns only the size bucket. The largest file is the drop policy's
+`max_file_bytes` (default 25 MiB; protocol ceiling 256 MiB; a host with no value is treated as 4 MiB).
 
 **Encryption keys.** Each client derives an X25519 key from its author seed
 (HKDF-SHA256, info `srnet-typed/x25519/v1`) and publishes the public half as `enc_key` in its
@@ -99,3 +100,33 @@ fee was taken when the buyer topped up; nothing more is charged. Each payment is
 - Sellers bind a vendor id once with `configureVendor(vendorId, salt)`; `srnet vendor --shop-key K`
   derives `salt = keccak("srnet-shop/v1" ‖ seller key)`. The seller's signature on the listing ties
   the store key to that vendor id.
+
+## Host remove (moderation)
+
+`mod` with `action:"remove"` and `target_type:"post"`. The host stores the record and replaces
+the entry with a tombstone `{"by":"remove","record":<the signed mod record>}` in the same step.
+Chain links cover ids only, so `seq`/`link`/checkpoint verification is unchanged. A syncing
+peer accepts a `remove` tombstone only if the record verifies against the host key from the
+pinned delegation and its `target` is that entry's id. When a peer sees the record it redacts
+its own copy (SQLite `secure_delete` plus a WAL checkpoint, so the bytes leave the disk). For a
+`drop.item`, the host deletes the blob, and clients delete their cached copy. A remove can't be
+undone or overridden. Clients show it as "Removed by host: <reason>". Hide/unhide are
+unchanged.
+
+## Room header and pins
+
+The policy (whose hash the host signs into every checkpoint) carries `description` (500 chars
+max) and `rules` (1000 chars max). Rooms and boards show them at the top. `mod` `pin`/`unpin`
+records pin a post; the active set is computed in record order, at most 3 (the oldest pin drops
+out), and a remove unpins. Hosts refuse a 4th pin.
+
+## Drop limits and resumable uploads
+
+Drop policy: `max_file_bytes`, `quota_bytes` (0 = none), also shown in `/v1/info`.
+- `POST /v1/upload` `{"upload":{v,coll,author,sha256,size,ts},"sig"}` signed by the uploader
+  (domain `srnet-typed/upload/v1`) answers `{have, chunk, done}`; it refuses with 413 over the
+  limit and 403 over the uploader's quota.
+- `POST /v1/upload/<sha256>?off=N` with up to 1 MiB of raw bytes; `off` must equal `have`
+  (409 returns the right `have`). After the last byte the hash is checked and the blob stored.
+- `GET /v1/upload/<sha256>` returns `{have}` to resume.
+- The old `POST /v1/blob` single upload still works when no quota is set.

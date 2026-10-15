@@ -44,7 +44,7 @@ srnet mail name 'srnet://room/...' "Bob's room"              # local petname for
   to your inbox on every host without telling the host who they are.
 - **Attach** a file in the Mail page and it is encrypted on your computer and stored on a file
   drop you've joined (no public listing). Only the key-in-link goes inside the sealed message,
-  so only your recipients can open it. Max 4 MiB per file. You can also paste file-drop links.
+  so only your recipients can open it. The size limit is set by the file drop host (25 MiB by default). You can also paste file-drop links.
 - Petnames are local only. Links can suggest a name; your own name always wins.
 
 Wire format and host API: [`snapps/docs/MAIL.md`](snapps/docs/MAIL.md).
@@ -124,6 +124,24 @@ buckets, name and type sealed inside). The host stores only ciphertext. Choose p
 
 Revoking someone stops them getting future versions. It can't take back a copy they already
 downloaded.
+
+Each file drop host sets its own largest file size (25 MiB by default) and may set a storage
+quota per uploader. The client reads the limit from the host's signed policy and refuses a
+larger file before uploading anything. Big files go up in 1 MiB chunks. If an upload is
+interrupted, uploading the same file again continues where it stopped.
+
+## Moderation, room headers and pins
+
+Hosts can act on content in three ways, each a signed, public record:
+
+- **Hide**: the post stays on the host and keeps syncing. Your client honours hides by default,
+  and you can choose to show a hidden post anyway.
+- **Remove**: for illegal content, doxxing or credible threats. The host deletes the post text,
+  or a file's bytes, at once. Mirrors and clients delete their copies when they next sync. The
+  post shows as "Removed by host: <reason>", and no setting brings it back.
+- **Pin**: up to 3 posts shown at the top of a room or board.
+
+Rooms also show a host-signed header with the room's description and rules.
 
 ## Paying
 

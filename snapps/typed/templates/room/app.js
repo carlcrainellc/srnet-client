@@ -3,12 +3,16 @@ let draftText = "", nickText = "", first = true;
 function render(v) {
   const r = tk.root(); const w = v.view;
   r.appendChild(tk.el("h2", null, "#" + v.collection));
+  tk.header(r, v);
   r.appendChild(tk.el("div", "muted", w.topic ? "Topic: " + w.topic.text + " (set by " + w.topic.by + ")" : "No topic"));
   const log = tk.el("div");
+  const rm = (v.removed || []).slice().sort((a, b) => a.seq - b.seq);
   for (const l of w.lines || []) {
+    while (rm.length && rm[0].seq < l.seq) log.appendChild(tk.removedEl(rm.shift()));
     const d = tk.el("div", "item"); d.appendChild(tk.el("span", "who", l.who)); d.appendChild(tk.el("span", "muted", " " + tk.when(l.ts) + " "));
     d.appendChild(tk.el("span", "body", l.text)); log.appendChild(d);
   }
+  for (const x of rm) log.appendChild(tk.removedEl(x));
   r.appendChild(log);
   const ta = tk.el("input"); ta.maxLength = 500; ta.placeholder = "Say something (signed by you)"; ta.value = draftText;
   ta.addEventListener("input", () => { draftText = ta.value; });

@@ -10,6 +10,19 @@ const tk = {
   el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = String(text); return e; },
   btn(label, fn) { const b = tk.el("button", null, label); b.addEventListener("click", fn); return b; },
   when(ts) { return new Date(ts * 1000).toLocaleString(); },
+  // Host removals (signed, public, irreversible): a placeholder line, never the content.
+  removedEl(x) { return tk.el("div", "item muted removed", "Removed by host: " + (x.reason || "no reason given")); },
+  removed(r, v) { for (const x of (v.removed || [])) r.appendChild(tk.removedEl(x)); },
+  // Host-signed header (description + rules) and up to 3 host pins, shown above the content.
+  header(r, v) {
+    const h = v.header; if (!h) return;
+    if (h.description) r.appendChild(tk.el("div", "header-desc", h.description));
+    if (h.rules) r.appendChild(tk.el("div", "muted header-rules", "Rules: " + h.rules));
+    for (const p of v.pinned || []) {
+      const d = tk.el("div", "item pinned"); d.appendChild(tk.el("span", "muted", "📌 pinned by host · "));
+      d.appendChild(tk.el("span", "who", p.who + " ")); d.appendChild(tk.el("span", "body", p.text)); r.appendChild(d);
+    }
+  },
   root() { const r = document.getElementById("root"); r.replaceChildren(); return r; },
   onView(fn) {
     window.addEventListener("message", (ev) => {

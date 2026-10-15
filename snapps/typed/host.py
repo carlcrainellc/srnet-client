@@ -17,8 +17,9 @@ from .ratelimit import RateLimiter
 from .store import Store
 
 DEFAULT_POLICY = {
-    "v": 1, "rules": "No illegal content, no spam, no doxxing. Hosts may hide posts; "
-                     "hides are signed and public, and clients can override them locally.",
+    "v": 1, "rules": "No illegal content, no spam, no doxxing. Hosts may hide posts "
+                     "(signed and public; clients can override them locally) and remove "
+                     "illegal content (signed and public; the text or file is deleted).",
     "appeal": "", "pow_bits": 18, "new_key_pow_bits": 21, "new_key_age_s": 86400,
     "rate": [[30, 3600], [200, 86400]], "new_key_rate": [[5, 3600]],
     "retention_days": 180, "checkpoint_valid_s": 3 * 3600,
@@ -35,6 +36,16 @@ def load_policy(path: str | None, board: str, overrides: dict | None = None) -> 
     return p
 
 
+def env_body(env) -> dict:
+    """Body of a stored typed record envelope ({"rec": {..., "body"}}), or {}."""
+    b = ((env or {}).get("rec") or {}).get("body") if isinstance(env, dict) else None
+    return b if isinstance(b, dict) else {}
+
+
+MAX_PINS = 3
+HEADER_FIELDS = {"description": 500, "rules": 1000}
+
+
 class Host:
     def __init__(self, data_dir: str, board: str, host_key, delegation: dict,
                  policy: dict | None = None, mirrors: list[str] | None = None, clock=time.time,
@@ -44,7 +55,9 @@ class Host:
         self.codec, self.rules = codec, rules
         os.makedirs(data_dir, exist_ok=True)
         self.board, self.key, self.delegation = board, host_key, delegation
-        self.policy = load_policy(None, board, policy)
+        self._base_policy = load_policy(None, board, policy)
+        self._header_path = os.path.join(data_dir, "header.json")
+        self._header_mt, self._policy = None, None
         self.store = Store(os.path.join(data_dir, "log.sqlite3"))
         self.rl = RateLimiter([tuple(r) for r in self.policy["rate"]])
         self.rl_new = RateLimiter([tuple(r) for r in self.policy["new_key_rate"]])
@@ -52,6 +65,55 @@ class Host:
         self._cp, self._cp_lock = None, threading.Lock()
         self._kick = threading.Event()
         self.push_report: dict = {}
+        self.blobs = None  # set by the hub for file drops
+        self.store.on_redact = self._on_redact
+
+    def _on_redact(self, pid, env, tomb):
+        """Host remove of a file: delete its blob bytes too (unless another live item uses it)."""
+        if tomb.get("by") != "remove" or not self.blobs or not isinstance(env, dict):
+            return
+        sha = env_body(env).get("sha256")
+        if sha and not any(env_body(e["env"]).get("sha256") == sha
+                           for e in self.store.since(0, 1 << 30) if "env" in e):
+            self.blobs.delete(sha)
+
+    # ---- policy, incl. the room header (description + rules), signed via checkpoint ----
+    @property
+    def policy(self) -> dict:
+        mt = os.path.getmtime(self._header_path) if os.path.exists(self._header_path) else None
+        if self._policy is None or mt != self._header_mt:
+            p = dict(self._base_policy)
+            if mt is not None:
+                with open(self._header_path) as f:
+                    p.update({k: v for k, v in json.load(f).items() if k in HEADER_FIELDS})
+            self._policy, self._header_mt = p, mt
+        return self._policy
+
+    @policy.setter
+    def policy(self, p):
+        self._base_policy, self._policy = p, None
+
+    def set_header(self, description: str | None = None, rules: str | None = None) -> dict:
+        """Edit the header every client shows at the top of the room.  It lives in the policy,
+        whose hash the host signs into each checkpoint, so mirrors can't alter it."""
+        h = {}
+        if os.path.exists(self._header_path):
+            with open(self._header_path) as f:
+                h = json.load(f)
+        for k, v in (("description", description), ("rules", rules)):
+            if v is not None:
+                if not isinstance(v, str) or len(v) > HEADER_FIELDS[k]:
+                    raise F.FormatError(f"{k}: at most {HEADER_FIELDS[k]} characters")
+                h[k] = v
+        with open(self._header_path + ".tmp", "w") as f:
+            json.dump(h, f)
+        os.replace(self._header_path + ".tmp", self._header_path)
+        self._policy = None
+        self._kick.set()
+        return {k: self.policy.get(k, "") for k in HEADER_FIELDS}
+
+    def pins(self) -> list[str]:
+        return active_pins(self.store.records_since(0, 1 << 30))
 
     # ---- spam gate ----
     def is_new_key(self, author: str) -> bool:
@@ -105,10 +167,27 @@ class Host:
         return 200, {"ok": True, "rid": rid, "rseq": rseq, "dup": rseq is None}
 
     def moderate(self, action: str, target_type: str, target: str, reason: str) -> dict:
+        """hide/unhide: signed public record, text kept, clients may override.
+        remove (posts only): signed public record AND the text (or file blob) is deleted here
+        at once, leaving a tombstone that carries the record; mirrors and clients redact too."""
+        if action in ("remove", "pin") and not self.store.has(target):
+            raise F.FormatError(f"unknown post {target}")
+        if action == "pin":
+            e = self.store.get(target)
+            if "env" not in e:
+                raise F.FormatError("can't pin a deleted or removed post")
+            p = self.pins()
+            if target in p:
+                raise F.FormatError("already pinned")
+            if len(p) >= MAX_PINS:
+                raise F.FormatError(f"at most {MAX_PINS} pins; unpin one first")
         env = F.make_mod(self.key, self.board, action, target_type, target, reason,
                          ts=int(self.clock()))
         rid = F.record_id(F.MOD_DOMAIN, env["mod"])
-        self.store.add_record("mod", env, rid)
+        with self.store.lock:
+            self.store.add_record("mod", env, rid)
+            if action == "remove":
+                self.store.redact(target, {"by": "remove", "record": env})
         self._kick.set()
         return env
 
@@ -126,7 +205,9 @@ class Host:
             rseq = self.store.rhead()
             now = int(self.clock())
             c = self._cp and self._cp["checkpoint"]
-            if not c or c["seq"] != seq or c["rseq"] != rseq or now - c["issued"] > 60:
+            ph = F.policy_hash(self.policy)
+            if not c or c["seq"] != seq or c["rseq"] != rseq or now - c["issued"] > 60 \
+                    or c.get("policy") != ph:
                 self._cp = F.make_checkpoint(self.key, self.board, seq, head,
                                              self.policy["checkpoint_valid_s"], now=now,
                                              policy=F.policy_hash(self.policy), rseq=rseq)
@@ -137,7 +218,9 @@ class Host:
         return {"v": 1, "board": self.board, "role": "primary", "host": F.pub_hex(self.key),
                 "seq": seq, "rseq": self.store.rhead(), "pow_bits": self.policy["pow_bits"],
                 "new_key_pow_bits": self.policy["new_key_pow_bits"],
-                "max_body_chars": F.MAX_BODY_CHARS}
+                "max_body_chars": F.MAX_BODY_CHARS,
+                **({"max_file_bytes": self.blobs.max_file_bytes,
+                    "quota_bytes": self.blobs.quota_bytes} if self.blobs else {})}
 
     # ---- push to mirrors ----
     def push(self) -> dict:
@@ -149,7 +232,8 @@ class Host:
                     cp = self.checkpoint()
                     mseq, mr = int(mi.get("seq", 0)), int(mi.get("rseq", 0))
                     c = cp["checkpoint"]
-                    if mseq >= c["seq"] and mr >= c["rseq"]:
+                    same_pol = mi.get("policy") in (None, c.get("policy"))  # header edits
+                    if mseq >= c["seq"] and mr >= c["rseq"] and (same_pol or _ > 0):
                         rep[m] = {"ok": True, "seq": mseq}
                         break
                     ents = [e for e in self.store.since(mseq, 500) if e["seq"] <= c["seq"]]
@@ -187,6 +271,20 @@ class Host:
                 except Exception as e:  # keep serving even if a tick fails
                     self.push_report = {"tick_error": str(e)}
         threading.Thread(target=loop, daemon=True).start()
+
+
+def active_pins(records) -> list[str]:
+    """Pinned post ids, oldest pin first, from host-signed pin/unpin records (max MAX_PINS)."""
+    out = []
+    for r in records:
+        if r["kind"] != "mod":
+            continue
+        m = r["rec"]["mod"]
+        if m["action"] == "pin" and m["target"] not in out:
+            out.append(m["target"])
+        elif m["action"] in ("unpin", "remove") and m["target"] in out:
+            out.remove(m["target"])
+    return out[-MAX_PINS:]
 
 
 def load_or_make_keys(data_dir: str, board: str):
