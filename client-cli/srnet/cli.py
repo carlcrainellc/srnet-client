@@ -233,9 +233,15 @@ def cmd_key(args, st: state.State) -> int:
         addr = keys.new(path, keys._password(confirm=True))
     print(f"{addr}  saved to {path}")
     if args.key_cmd == "new":
-        print("fund this address with ETH for gas and USDC. Back up the file and passphrase; "
-              "there is no recovery.")
+        print(NEW_KEY_NOTE)
     return 0
+
+
+NEW_KEY_NOTE = (
+    "Next: top up your SRNet balance from any wallet with `srnet topup` or Wallet / Top up in\n"
+    "`srnet ui` (USDC on Arbitrum One; gasless, no ETH needed). A little ETH in this address is\n"
+    "only needed for now to pay directly from this key (store items, exit hours).\n"
+    "Back up the keystore file and your passphrase: there is no recovery.")
 
 
 def _chain_name(cid: int) -> str:

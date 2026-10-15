@@ -40,6 +40,7 @@ jobs:
         shell: pwsh
         run: |
           $py = "$env:LOCALAPPDATA\srnet-client\venv\Scripts\python.exe"
+          & $py -m pip install -q playwright   # test-only: drives the runner's Chrome for UI tests
           cd snapps/tests
           & $py -m unittest -v
           if ($LASTEXITCODE) { exit 1 }
@@ -73,5 +74,6 @@ jobs:
         run: |
           PY=~/.local/share/srnet-client/venv/bin/python
           (cd client-cli && $PY -m unittest discover -s tests) </dev/null
+          $PY -m pip install -q playwright   # test-only: drives the runner's Chrome for UI tests
           (cd snapps/tests && $PY -m unittest)
           $PY packaging/windows/smoke_local.py

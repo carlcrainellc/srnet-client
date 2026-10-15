@@ -14,9 +14,28 @@ const tk = {
   onView(fn) {
     window.addEventListener("message", (ev) => {
       if (ev.source !== parent) return;
-      const m = ev.data; if (m && m.type === "view") { tk.view = m.data; fn(m.data); }
+      const m = ev.data;
+      if (m && m.type === "view") { tk.view = m.data; const keep = tk._snap(); fn(m.data); tk._restore(keep); }
     });
     tk.send({type: "ready"});
+  },
+  // Views re-render on every sync. Keep what the user is typing, and where, across renders:
+  // fields are matched by data-k (or placeholder); a field the template filled keeps its value.
+  _key(e) { return e.dataset.k || e.placeholder || e.name || ""; },
+  _fields() { return Array.from(document.querySelectorAll("#root input, #root textarea, #root select")); },
+  _snap() {
+    const vals = {}, a = document.activeElement;
+    for (const e of tk._fields()) { const k = tk._key(e); if (k && e.type !== "file") vals[k] = e.value; }
+    const f = a && a !== document.body && tk._fields().includes(a) ? {k: tk._key(a), s: a.selectionStart, e: a.selectionEnd} : null;
+    return {vals, f};
+  },
+  _restore(keep) {
+    const els = tk._fields();
+    for (const e of els) { const k = tk._key(e), v = keep.vals[k]; if (v && !e.value && e.type !== "file") e.value = v; }
+    if (keep.f) {
+      const e = els.find((x) => tk._key(x) === keep.f.k);
+      if (e) { e.focus(); try { if (keep.f.s != null) e.setSelectionRange(keep.f.s, keep.f.e); } catch (err) { /* not a text field */ } }
+    }
   },
   status(v) { const s = tk.el("div", "muted", (v.rules ? "Rules: " + v.rules : "")); return s; },
 };
