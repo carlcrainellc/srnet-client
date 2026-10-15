@@ -125,7 +125,9 @@ class Browser(unittest.TestCase):
             rep = {}
             for line in m.group(1).strip().splitlines():
                 rep.update(json.loads(line.replace("&quot;", '"').replace("&amp;", "&")))
-            if "fetch_core_api" in rep and "verified hello" in rep.get("view_received", ""):
+            # also wait for the template's valid draft to reach the core's sheet (slow runners)
+            if "fetch_core_api" in rep and "verified hello" in rep.get("view_received", "") \
+                    and "Sign and post?" in dom:
                 break
         # beacon/form only report "queued"; whether anything left is decided by the canary below
         allowed = {k: v for k, v in rep.items() if v.startswith("ALLOWED")

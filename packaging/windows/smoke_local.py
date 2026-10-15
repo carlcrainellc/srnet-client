@@ -54,7 +54,23 @@ def api(path, body=None, raw=None, port=48920):
         return json.loads(b) if r.headers.get_content_type() == "application/json" else b
 
 
+def wait_ports_free(ports, secs=60):
+    """An earlier CI step's processes can hold the fixed ports for a moment after being killed."""
+    import socket
+    for _ in range(secs):
+        busy = []
+        for port in ports:
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    busy.append(port)
+        if not busy:
+            return
+        time.sleep(1)
+    raise SystemExit(f"FAIL: ports still in use: {busy}")
+
+
 try:
+    wait_ports_free((48920, 48940, 48941))
     th = start([py, str(snapps / "scripts" / "local_test_host.py"), "--data", str(home / "testhost")])
     wait_line(th, "READY")
     links = json.loads((home / "testhost" / "links.json").read_text())
