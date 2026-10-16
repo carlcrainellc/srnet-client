@@ -104,7 +104,23 @@ def cmd_exits(args, st: state.State) -> int:
     return 0
 
 
+def _own_sesh() -> str:
+    """This machine's .sesh address: Session Router answers localhost.sesh with a CNAME to it."""
+    import socket
+    try:
+        name = socket.getaddrinfo("localhost.sesh", 80, flags=socket.AI_CANONNAME)[0][3].rstrip(".")
+    except OSError:
+        return ""
+    return name if name.endswith(".sesh") and name != "localhost.sesh" else ""
+
+
 def cmd_buy(args, st: state.State) -> int:
+    if not args.client_sesh:
+        args.client_sesh = _own_sesh()
+        if not args.client_sesh:
+            print("could not read your .sesh address from Session Router (is .sesh DNS working? run "
+                  "srnet doctor); or pass --client-sesh ADDRESS.sesh", file=sys.stderr)
+            return 1
     warning.ensure_ack(st.root)
     cfg = _cfg(st)
     try:
@@ -811,7 +827,7 @@ def main(argv=None) -> int:
     b.add_argument("seller")
     b.add_argument("--listings", help="offline: listings file instead of the board")
     b.add_argument("--no-deliver", action="store_true", help="only write the claim to the local spool")
-    b.add_argument("--client-sesh", required=True, help="your own .sesh address (goes in the claim)")
+    b.add_argument("--client-sesh", help="your own .sesh address (goes in the claim; default: asked from Session Router)")
     b.add_argument("--rpc", help="JSON-RPC URL (default $SRNET_RPC, else Arbitrum One public RPC)")
     b.add_argument("--private-key", help="plaintext wallet key (discouraged; use srnet key import)")
     b.add_argument("--hours", type=int, default=1,
