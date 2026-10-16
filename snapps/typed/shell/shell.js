@@ -181,10 +181,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const on = $("modtoggle").dataset.on === "1";
     await api("moderation", {mode: on ? "honour" : "ignore"});
     $("modtoggle").dataset.on = on ? "0" : "1";
-    $("modtoggle").textContent = on ? "Show host-hidden" : "Honour host hides";
+    $("modtoggle").textContent = on ? "Show host-hidden" : "Honor host hides";
     const tip = on
-      ? "Shows posts and files the host has hidden, so you can still read them. Off by default: the client honours host hides."
-      : "Currently showing host-hidden posts and files. Click to honour host hides again.";
+      ? "Shows posts and files the host has hidden, so you can still read them. Off by default: the client honors host hides."
+      : "Currently showing host-hidden posts and files. Click to honor host hides again.";
     $("modtoggle").title = tip;
     if ($("modhint")) $("modhint").title = tip;
     push();
@@ -231,6 +231,8 @@ const W = (() => {
     $("x-ar").checked = !!r.auto_renew;
     $("x-left").textContent = r.time_left_s !== undefined ? Math.floor(r.time_left_s / 60) + " min" + (r.seller_stopped ? " (seller stopped)" : "") : (r.seller ? "press Refresh and enter your passphrase" : "-");
     if (r.client_sesh && !$("x-cs").value) $("x-cs").value = r.client_sesh;
+    if (r.relayer && !$("w-relayer").value) $("w-relayer").value = r.relayer;
+    syncRelayerUi($("w-relayer").value, r.relayer || undefined);
   }
   async function status(pw) { const r = await call("status", pw ? {passphrase: pw} : {}); if (!r.ok) log("status: " + r.err); fill(r); return r; }
   async function act(name, extra, pw) {
@@ -241,16 +243,23 @@ const W = (() => {
   async function board() {
     $("x-boardinfo").textContent = "loading the signed exit board…";
     const tb = $("x-board").querySelector("tbody"); tb.replaceChildren();
+    const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = setTimeout(() => { if (ac) ac.abort(); }, 20000);
     let r;
     try {
-      r = await Promise.race([
-        call("board"),
-        new Promise((_, rej) => setTimeout(() => rej(new Error("timed out after 20s — is Session Router running, and can it reach the exit board?")), 20000)),
-      ]);
+      const opt = {method: "POST", headers: {"X-Core": "1", "Content-Type": "application/json"}, body: "{}"};
+      if (ac) opt.signal = ac.signal;
+      const resp = await fetch("/api/wallet/board", opt);
+      r = await resp.json();
     } catch (e) {
-      $("x-boardinfo").textContent = "board unavailable: " + (e && e.message ? e.message : e);
+      clearTimeout(timer);
+      const aborted = ac && e && e.name === "AbortError";
+      $("x-boardinfo").textContent = aborted
+        ? "board unavailable: timed out after 20s — is Session Router running, and can it reach the exit board?"
+        : "board unavailable: " + (e && e.message ? e.message : e);
       return;
     }
+    clearTimeout(timer);
     if (!r.ok) { $("x-boardinfo").textContent = "board unavailable: " + (r.err || "unknown error"); return; }
     $("x-boardinfo").textContent = "signed board seq " + r.seq + " from " + r.source + (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.listings.length ? "" : " · no sellers listed right now");
     for (const l of r.listings) {
@@ -266,23 +275,51 @@ const W = (() => {
   let topupTimer = null;
   async function pollTopup() {
     const r = await call("topup/status");
-    $("w-topupstate").textContent = r.state + (r.out ? ": " + r.out.trim().split("\n").slice(-2).join(" ") : "");
+    setText("w-topupstate", r.state + (r.out ? ": " + r.out.trim().split("\n").slice(-2).join(" ") : ""));
     if (r.state !== "waiting" && topupTimer) { clearInterval(topupTimer); topupTimer = null; status(); }
+  }
+  function setText(id, text) {
+    const n = $(id); if (!n) return;
+    n.textContent = text || "";
+    if (id === "w-warn" || id === "w-uri" || id === "w-topupstate") n.hidden = !text;
+  }
+  let savedRelayer = "";
+  function syncRelayerUi(url, saved) {
+    const typed = (url || "").trim();
+    if (saved !== undefined) savedRelayer = (saved || "").trim();
+    const ready = !!(savedRelayer && typed === savedRelayer);
+    const tip = $("w-relayerhint");
+    if (tip) {
+      tip.hidden = ready;
+      tip.textContent = ready ? "" :
+        (typed && typed !== savedRelayer
+          ? "Press Save to use this relayer for deposits and payments. There is no default URL."
+          : "Set and save a relayer URL before deposits or payments. There is no default — paste the URL your operator gave you.");
+    }
+    $("w-topup").disabled = !ready;
+    $("w-topup").title = ready ? "Deposit after you send USDC" : "Save a relayer URL first";
+    $("w-showqr").title = ready ? "Show deposit QR" : "You can preview the QR, but deposit needs a saved relayer";
   }
   async function showQr() {
     const r = await call("topup/info", {amount: $("w-amt").value});
-    if (!r.ok) { $("w-warn").textContent = "top up: " + r.err; return; }
-    $("w-warn").textContent = r.warning + "\nDeposit fee: " + r.fee_pct + "% of the whole deposit. Relayer fee: " + Number(r.relay_fee).toFixed(2) + " USDC." + (r.relayer ? "" : "\nSet your relayer above first.");
-    $("w-uri").textContent = r.uri;
+    if (!r.ok) { setText("w-warn", "top up: " + r.err); return; }
+    const need = r.relayer ? "" : "\nSet and save your relayer above before depositing.";
+    setText("w-warn", r.warning + "\nDeposit fee: " + r.fee_pct + "% of the whole deposit. Relayer fee: " + Number(r.relay_fee).toFixed(2) + " USDC." + need);
+    let uri = r.uri;
     const q = r.qr ? await fetch("/api/wallet/qr.svg", {headers: {"X-Core": "1"}}) : null;
     if (q && q.ok) {
       $("w-qr").src = URL.createObjectURL(await q.blob()); // reviewed: blob: of the core's own QR svg; img-src allows blob: only
       $("w-qr").hidden = false; }
-    else { $("w-qr").hidden = true; $("w-uri").textContent += "  (install the qrcode package for a QR image; the address works too)"; }
+    else { $("w-qr").hidden = true; uri += "  (install the qrcode package for a QR image; the address works too)"; }
+    setText("w-uri", uri);
     if (!$("w-relayer").value) $("w-relayer").value = r.relayer || "";
+    const u = $("w-relayer").value || r.relayer || "";
+    syncRelayerUi(u, r.relayer || savedRelayer || undefined);
   }
   function wire() {
     if (!S.wallet) { $("x-boardinfo").textContent = "wallet not running: start SRNet with `srnet ui`"; }
+    syncRelayerUi($("w-relayer").value);
+    $("w-relayer").addEventListener("input", () => syncRelayerUi($("w-relayer").value));
     $("x-refresh").addEventListener("click", () => { board(); withPass("Refresh lease and balances?", "your passphrase unlocks the keystore for this read only", [], "Refresh", (pw) => status(pw)); });
     const unlockBal = () => withPass("Unlock balances?", "your passphrase unlocks the keystore for this read only; it isn't saved", [], "Unlock", (pw) => status(pw));
     $("w-unlock").addEventListener("click", unlockBal);
@@ -292,11 +329,18 @@ const W = (() => {
       if (!on) return act("autorenew", {on: false});
       e.target.checked = false; withPass("Turn on auto-renew?", "buys the next hour near the end of each lease; each hour is final", [], "Turn on", (pw) => act("autorenew", {on: true}, pw)); });
     $("w-showqr").addEventListener("click", showQr);
-    $("w-saverelayer").addEventListener("click", async () => { const r = await call("relayer", {url: $("w-relayer").value.trim()}); $("w-topupstate").textContent = r.ok ? "relayer saved" : r.err; });
-    $("w-topup").addEventListener("click", () => withPass("Deposit USDC into SRNet balance?", "waits for the USDC you sent, then a gas-free approval and the relayer deposit — no ETH needed", ["amount: " + $("w-amt").value + " USDC"], "Deposit now", async (pw) => {
+    $("w-saverelayer").addEventListener("click", async () => {
+      const r = await call("relayer", {url: $("w-relayer").value.trim()});
+      setText("w-topupstate", r.ok ? "relayer saved" : (r.err || "could not save relayer"));
+      if (r.ok) syncRelayerUi($("w-relayer").value, $("w-relayer").value.trim());
+    });
+    $("w-topup").addEventListener("click", () => {
+      if ($("w-topup").disabled || !$("w-relayer").value.trim()) { setText("w-topupstate", "set and save a relayer URL first"); return; }
+      withPass("Deposit USDC into SRNet balance?", "waits for the USDC you sent, then a gas-free approval and the relayer deposit — no ETH needed", ["amount: " + $("w-amt").value + " USDC"], "Deposit now", async (pw) => {
       const r = await call("topup/start", {amount: $("w-amt").value, passphrase: pw});
-      if (!r.ok) { $("w-topupstate").textContent = "top up: " + r.err; return; }
-      if (!topupTimer) topupTimer = setInterval(pollTopup, 5000); pollTopup(); }));
+      if (!r.ok) { setText("w-topupstate", "top up: " + r.err); return; }
+      if (!topupTimer) topupTimer = setInterval(pollTopup, 5000); pollTopup(); });
+    });
   }
   return {board, status, wire};
 })();

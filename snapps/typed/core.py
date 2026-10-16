@@ -967,7 +967,7 @@ def make_handler(core: Core, test_mode=False):
                                          headers={"Content-Type": "application/json", "X-CSRF-Token": tok})
             try:
                 # Board fetch needs Session Router; fail fast so Exits doesn't spin forever.
-                to = 25 if call == "board" else 600
+                to = 18 if call == "board" else 600  # under the shell's 20s AbortController
                 with urllib.request.urlopen(req, timeout=to) as r:
                     body = r.read(1 << 22)
             except urllib.error.HTTPError as e:

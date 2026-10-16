@@ -67,6 +67,9 @@ class WalletTabs(unittest.TestCase):
             pg.wait_for_selector("#home:not([hidden])", timeout=20000)  # opens on Home
             tip = pg.get_attribute("#modtoggle", "title") or ""
             self.assertIn("host has hidden", tip.lower())
+            self.assertIn("honors", tip.lower())
+            self.assertNotIn("honours", tip.lower())
+            self.assertEqual(pg.inner_text("#modhint").strip(), "Host-hidden")
             # Exits: board renders natively; Buy asks for the passphrase and says final; Cancel sends nothing
             pg.click("#ribbon button[data-b=exits]")
             pg.wait_for_selector("#x-board tbody tr", timeout=15000)
@@ -94,6 +97,8 @@ class WalletTabs(unittest.TestCase):
             wait_text(pg, "#w-usdc", lambda t: "Unlock to see balances" in t)
             self.assertTrue(pg.is_visible("#w-unlock"))
             self.assertIn("I've sent USDC", pg.inner_text("#w-topup"))
+            self.assertTrue(pg.is_disabled("#w-topup"))  # no relayer saved yet
+            self.assertTrue(pg.is_visible("#w-relayerhint"))
             pg.click("#w-unlock")
             pg.wait_for_selector("#sheet:not([hidden])")
             pg.fill("#sheet-pw", "pw123")
@@ -111,6 +116,12 @@ class WalletTabs(unittest.TestCase):
             pg.click("#w-saverelayer")
             wait_text(pg, "#w-topupstate", bool)
             self.assertNotIn("saved", pg.inner_text("#w-topupstate"))
+            self.assertTrue(pg.is_disabled("#w-topup"))
+            pg.fill("#w-relayer", "http://127.0.0.1:8645")
+            pg.click("#w-saverelayer")
+            wait_text(pg, "#w-topupstate", lambda s: "saved" in s)
+            self.assertFalse(pg.is_disabled("#w-topup"))
+            self.assertFalse(pg.is_visible("#w-relayerhint"))
             # Check my setup
             pg.click("#ribbon button[data-b=home]")
             with mock.patch("srnet.preflight.run", return_value={"preflight": "OK", "when": "t", "host": "h", "checks": [

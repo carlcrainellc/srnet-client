@@ -68,6 +68,7 @@ class Backend:
                "seller": lease.get("seller"), "auto_renew": bool(lease.get("auto_renew")),
                "renewer_running": bool(self.renewer and self.renewer.poll() is None),
                "client_sesh": self.cfg().get("client_sesh") or lease.get("client_sesh") or "",
+               "relayer": self.relayer_url(),
                "unlocked": False}
         if passphrase:
             pk = keys.unlock(self._keystore(), passphrase)

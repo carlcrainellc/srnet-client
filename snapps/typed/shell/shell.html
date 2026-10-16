@@ -4,8 +4,8 @@
 <body>
 <header id="core-bar"><strong>SRNet</strong> <span class="muted">typed client core</span>
   <nav id="ribbon"><button data-b="home">Home</button><button data-b="exits">Exits (Beta)</button><button data-b="wallet">Wallet</button></nav>
-  <button id="modtoggle" title="Shows posts and files the host has hidden, so you can still read them. Off by default: the client honours host hides.">Show host-hidden</button>
-  <span class="muted" id="modhint" title="Shows posts and files the host has hidden, so you can still read them. Off by default: the client honours host hides.">Shows posts/files the host hid</span>
+  <button id="modtoggle" title="Shows posts and files the host has hidden, so you can still read them. Off by default: the client honors host hides.">Show host-hidden</button>
+  <span class="muted" id="modhint" title="Shows posts and files the host has hidden, so you can still read them. Off by default: the client honors host hides.">Host-hidden</span>
   <span id="status" class="muted"></span></header>
 <section id="upload" hidden>Share a file: <input type="file" id="file"> <input id="note" placeholder="note (optional)" maxlength="500">
   <select id="mode"><option value="gated" selected>Encrypted: only me and people I choose</option><option value="link">Encrypted: anyone with the link</option><option value="plain">Not encrypted: public and indexable</option></select>
@@ -22,12 +22,13 @@
 <section id="exits" hidden><h2>Exits <span class="warn">Beta / Untested</span></h2>
   <p class="warn">The exit marketplace works but is not production-certified. Buy one hour at a time and keep amounts small.</p>
   <p class="muted">Buy an hour of exit from a seller on the signed board, paid from your SRNet balance (top up in Wallet). Payment is final; auto-renew buys the next hour near the end. With your relayer set, no ETH is needed.</p>
-  <div class="row"><label>Your .sesh address <input id="x-cs" size="60" spellcheck="false"></label></div>
+  <div class="row"><label>Your .sesh address <input id="x-cs" size="60" spellcheck="false" placeholder="fills when Session Router is running"></label></div>
+  <p class="muted" id="x-cs-hint">Blank until Session Router is up and your client address is known. Paste one if you already have it.</p>
   <h3>Lease</h3>
   <table class="kv"><tr><th>Seller</th><td id="x-seller">-</td></tr><tr><th>Time left</th><td id="x-left">-</td></tr>
     <tr><th>Connected</th><td id="x-conn">no</td></tr><tr><th>Auto-renew</th><td><label><input id="x-ar" type="checkbox"> renew hourly</label></td></tr></table>
   <button id="x-disconnect">Disconnect</button> <button id="x-refresh">Refresh</button>
-  <h3>Exit sellers</h3><p class="muted" id="x-boardinfo"></p>
+  <h3>Exit sellers</h3><p class="muted" id="x-boardinfo">Open this tab to load the signed exit board (needs Session Router).</p>
   <table id="x-board" class="grid"><thead><tr><th>Seller</th><th>Region</th><th>USDC/hr</th><th>Last refresh</th><th></th></tr></thead><tbody></tbody></table>
   <pre id="x-log" class="log"></pre></section>
 <section id="wallet" hidden><h2>Wallet</h2>
@@ -37,11 +38,12 @@
   <span class="muted" id="w-balhint">Press Unlock and enter your passphrase to load balances. It isn't saved.</span>
   <h3>Top up: scan the QR or send USDC from any wallet</h3>
   <label>Relayer URL (set once) <input id="w-relayer" size="40" spellcheck="false" placeholder="https://relayer.example"></label> <button id="w-saverelayer">Save</button>
+  <p class="muted" id="w-relayerhint">Set and save a relayer URL before deposits or payments. There is no default — paste the URL your operator gave you.</p>
   <p class="muted">The relayer pays the network fee for deposits, payments, renewals and cash-outs, so you never need ETH. It takes a small USDC fee from your SRNet balance and can't move your funds anywhere else.</p>
   <label>Amount (USDC) <input id="w-amt" type="number" min="1" step="1" value="10"></label> <button id="w-showqr">Show QR</button>
-  <pre id="w-warn" class="warn"></pre><img id="w-qr" alt="top-up QR" width="240" height="240" hidden><p class="muted" id="w-uri"></p>
+  <pre id="w-warn" class="warn" hidden></pre><img id="w-qr" alt="top-up QR" width="240" height="240" hidden><p class="muted" id="w-uri" hidden></p>
   <p>Send USDC on Arbitrum One to the address above: scan the QR with a phone wallet, or paste the address into any exchange or wallet. Then press <b>I've sent USDC — deposit now</b>. The client waits for the USDC, signs a gas-free approval, and the relayer moves it into your SRNet balance.</p>
-  <button id="w-topup">I've sent USDC — deposit now</button><p class="muted" id="w-topupstate"></p>
+  <button id="w-topup" disabled title="Save a relayer URL first">I've sent USDC — deposit now</button><p class="muted" id="w-topupstate" hidden></p>
   <p class="muted">Exits and shop items are paid from your SRNet balance through your relayer and confirmed in a sheet here.</p></section>
 <iframe id="tpl" sandbox="allow-scripts" referrerpolicy="no-referrer" title="template"></iframe></main></div>
 <div id="sheet" hidden><div class="card"><h3 id="sheet-title"></h3><div class="muted" id="sheet-sub"></div>
