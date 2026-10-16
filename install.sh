@@ -57,8 +57,21 @@ fi
 
 echo
 echo "Done. Next steps:"
-case ":$PATH:" in *":$BIN:"*) ;; *) echo "  add $BIN to your PATH";; esac
-case ":$PATH:" in *":$BIN:"*) ;; *) echo "  (or open a new terminal; Ubuntu adds ~/.local/bin to PATH at login once it exists)";; esac
+case ":$PATH:" in
+  *":$BIN:"*) ;;
+  *)
+    echo
+    echo "  $BIN is not on your PATH in this terminal. Run this, then try srnet again:"
+    echo
+    if [ "$BIN" = "$HOME/.local/bin" ]; then
+      echo '    export PATH="$HOME/.local/bin:$PATH"'
+    else
+      echo "    export PATH=\"$BIN:\$PATH\""
+    fi
+    echo
+    echo "  New terminals after your next login pick it up on Ubuntu automatically."
+    ;;
+esac
 echo "  srnet key new      create your wallet (saved encrypted)"
 echo "  srnet doctor       check your setup (Session Router, DNS, wallet); writes a report"
 echo "  srnet ui           open the app in your browser"

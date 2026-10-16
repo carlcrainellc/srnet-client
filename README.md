@@ -59,16 +59,47 @@ Linux is the supported platform for this release; it is tested on Ubuntu 24.04.
 
 ### 1. Session Router (separate prerequisite)
 
-SRNet runs on top of Session Router, which carries all `.sesh` traffic. It is a separate program:
-install it and start it yourself first. This client never installs it and never sets it up as a
-service. Check that it is running and its API answers on `127.0.0.1:1190`:
+SRNet runs on top of Session Router, which carries all `.sesh` traffic. It is a separate program
+from the Session Foundation: install and start it yourself first. This client never installs it.
+
+On Ubuntu 24.04, add the Session Foundation apt repo and install the client package:
+
+```sh
+sudo curl -so /usr/share/keyrings/session-foundation.gpg https://deb.session.foundation/pub.gpg
+echo "deb [signed-by=/usr/share/keyrings/session-foundation.gpg] https://deb.session.foundation $(. /etc/os-release; echo $VERSION_CODENAME) main" | sudo tee /etc/apt/sources.list.d/session-foundation.list
+sudo apt update
+sudo apt install -y session-router-client
+```
+
+The package (not SRNet) sets up `session-router-client.service`, starts it now and enables it
+at boot. To stop it starting at boot and run it only when you want:
+
+```sh
+sudo systemctl disable session-router-client   # no autostart at boot
+sudo systemctl start session-router-client     # start it yourself
+sudo systemctl stop session-router-client      # stop it
+```
+
+Ubuntu's resolver (systemd-resolved) does not send `.sesh` names to Session Router on its own.
+Add this once so it does, every time the service starts:
+
+```sh
+sudo mkdir -p /etc/systemd/system/session-router-client.service.d
+printf '[Service]\nExecStartPost=+/bin/sh -c "sleep 3; resolvectl dns sr-tun0 127.3.2.1; resolvectl domain sr-tun0 ~sesh ~snode; resolvectl default-route sr-tun0 false"\n' | sudo tee /etc/systemd/system/session-router-client.service.d/dns.conf
+sudo systemctl daemon-reload
+sudo systemctl restart session-router-client
+```
+
+Only `.sesh` and `.snode` names go to Session Router; all other DNS is unchanged. Then check that
+its API is listening on `127.0.0.1:1190` and `.sesh` names resolve:
 
 ```sh
 ss -ltnp | grep 1190          # something listening on 127.0.0.1:1190
-getent hosts localhost.sesh   # .sesh names resolve
+getent hosts localhost.sesh   # prints an fd2e:... address
 ```
 
-`srnet doctor` runs the same checks and tells you what to fix.
+Other systems: see the upstream install guide at
+https://github.com/session-foundation/session-router/blob/dev/docs/install.md
 
 ### 2. The SRNet client
 
@@ -80,10 +111,17 @@ cd srnet-client
 ```
 
 The installer needs no root. It puts everything under `~/.local/share/srnet-client` and adds
-`srnet` and `srnet-relayer` to `~/.local/bin`. If `srnet` is not found afterwards, open a new
-terminal (Ubuntu adds `~/.local/bin` to your PATH at login once it exists) or run
-`export PATH="$HOME/.local/bin:$PATH"`. `./install.sh --uninstall` removes it and keeps your
-wallet in `~/.srnet`.
+`srnet` and `srnet-relayer` to `~/.local/bin`. `./install.sh --uninstall` removes it and keeps your wallet in `~/.srnet`.
+
+If `srnet` says "command not found", `~/.local/bin` is not on your PATH in this terminal yet.
+Run this (Ubuntu adds it for new logins automatically):
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then run `srnet doctor`: it checks Session Router, `.sesh` names and the rest of your setup, and
+tells you what to fix.
 
 ### 3. First run
 
