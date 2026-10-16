@@ -54,12 +54,14 @@ class Backend:
         good, info = boardmod.fetch(boardmod.sources(cfg), boardmod.pin_of(cfg), self.st.root,
                                     dns=cfg.get("sesh_dns"))
         now = time.time()
+        hidden = sum(1 for d in good if not boardmod.buyable(d))
+        good = [d for d in good if boardmod.buyable(d)]
         rows = [{"seller": d["listing"]["seller"], "region": d["listing"].get("region") or "",
                  "price": str(d["listing"].get("price_per_hour_usdc", d["listing"].get("price_usdc", ""))),
                  "age_s": max(0, int(now - int(d["listing"].get("issued", 0))))} for d in good]
         rows.sort(key=lambda r: r["seller"])
         return {"listings": rows, "seq": info["seq"], "source": info["source"],
-                "dropped": len(info["dropped"])}
+                "dropped": len(info["dropped"]), "hidden": hidden}
 
     def status(self, passphrase: str | None) -> dict:
         d = self._reload()

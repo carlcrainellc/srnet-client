@@ -34,7 +34,7 @@ async function loadBoard() {
   tb.textContent = "";
   if (!r.ok) { $("boardinfo").textContent = "board unavailable: " + r.err; return; }
   $("boardinfo").textContent = "board seq " + r.seq + " from " + r.source +
-    (r.dropped ? ", " + r.dropped + " dropped" : "");
+    (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.hidden ? ", " + r.hidden + " hidden (other payment contract)" : "");
   for (const l of r.listings) {
     const tr = document.createElement("tr");
     cell(tr, l.seller); cell(tr, l.region || "-"); cell(tr, l.price); cell(tr, ago(l.age_s));

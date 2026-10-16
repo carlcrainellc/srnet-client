@@ -113,3 +113,14 @@ def table(listings: list[dict], now: float) -> str:
                      str(b.get("price_per_hour_usdc", b.get("price_usdc", "?"))), ago))
     w = [max(len(r[i]) for r in rows) for i in range(4)]
     return "\n".join("  ".join(c.ljust(w[i]) for i, c in enumerate(r)).rstrip() for r in rows)
+
+
+def buyable(d: dict) -> bool:
+    """A listing this client can pay: its contract is the known SRNetBalance deployment for its chain."""
+    from . import chain
+    L = d.get("listing") or {}
+    try:
+        known = chain.DEPLOYMENTS.get(int(L["chainid"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return bool(known) and str(L.get("contract", "")).lower() == known.lower()

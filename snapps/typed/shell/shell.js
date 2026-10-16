@@ -273,7 +273,7 @@ const W = (() => {
     clearTimeout(timer);
     if (gen !== boardGen) return;
     if (!r.ok) { $("x-boardinfo").textContent = boardErr(r.err); return; }
-    $("x-boardinfo").textContent = "signed board seq " + r.seq + " from " + r.source + (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.listings.length ? "" : " · no sellers listed right now");
+    $("x-boardinfo").textContent = "signed board seq " + r.seq + " from " + r.source + (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.hidden ? ", " + r.hidden + " hidden (other payment contract)" : "") + (r.listings.length ? "" : " · no sellers listed right now");
     for (const l of r.listings) {
       const tr = el("tr"); [l.seller, l.region || "-", l.price, ago(l.age_s)].forEach((t) => tr.appendChild(el("td", t)));
       const td = el("td"), b = el("button", "Buy 1 hour"), c = el("button", "Connect");

@@ -99,15 +99,8 @@ def cmd_exits(args, st: state.State) -> int:
     if not board:
         print("(no valid listings)")
         return 0
-    def _ours(d):
-        L = d["listing"]
-        try:
-            known = chain.DEPLOYMENTS.get(int(L["chainid"]))
-        except (KeyError, TypeError, ValueError):
-            return False
-        return bool(known) and str(L.get("contract", "")).lower() == known.lower()
-    stale = [d for d in board if not _ours(d)]
-    board = [d for d in board if _ours(d)]
+    stale = [d for d in board if not boardmod.buyable(d)]
+    board = [d for d in board if boardmod.buyable(d)]
     print("Exit marketplace: Beta / Untested. Not production-certified; buy one hour at a time.", file=sys.stderr)
     if stale:
         print(f"{len(stale)} listing(s) hidden: they point at another payment contract and can't be bought "
