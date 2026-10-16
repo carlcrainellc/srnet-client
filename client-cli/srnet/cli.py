@@ -330,8 +330,16 @@ def cmd_doctor(args, st: state.State) -> int:
             line(True, "SRNet balance", f"{avail / 1e6:.2f}" + ("" if avail else " (top up: srnet topup or the Wallet tab)"))
     except chain.ChainError as e:
         line(False, "chain", str(e))
-    print("all good" if not bad else f"{bad} problem(s) above")
-    return 1 if bad else 0
+    pf = rep.get("preflight", "OK")
+    if bad:
+        print(f"{bad} problem(s) above")
+    elif pf == "FAIL":
+        print("setup preflight failed; see CHECK/FIX lines above")
+    elif pf == "WARN":
+        print("wallet checks look fine; setup preflight has warnings above (often Session Router)")
+    else:
+        print("all good")
+    return 1 if bad or pf == "FAIL" else 0
 
 
 def _rate_hours(args, L: dict) -> tuple[int, int]:
