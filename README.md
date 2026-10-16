@@ -73,7 +73,7 @@ getent hosts localhost.sesh   # .sesh names resolve
 
 ```sh
 sudo apt install -y git python3-venv
-git clone <this repository> srnet-client
+git clone https://github.com/carlcrainellc/srnet-client.git srnet-client
 cd srnet-client
 ./install.sh
 ```
