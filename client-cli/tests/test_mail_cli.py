@@ -21,6 +21,6 @@ class MailCLI(unittest.TestCase):
             r = self.run_cli(h, "name", "srnet://room/abc?name=Bobs%20Room")
             self.assertEqual(json.loads(r.stdout)["name"], "Bobs Room")
             r = self.run_cli(h, "address")
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("no mail hosts", r.stderr)
+            self.assertEqual(r.returncode, 0, r.stderr)  # shipped default mail host
+            self.assertIn("srnet://mail/", r.stdout)
             self.assertTrue((Path(h) / "snapps" / "author.key").exists())

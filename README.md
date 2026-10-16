@@ -90,6 +90,16 @@ sudo systemctl daemon-reload
 sudo systemctl restart session-router-client
 ```
 
+Programs look names up through `/etc/resolv.conf`. On a stock Ubuntu desktop it already points
+at systemd-resolved (`nameserver 127.0.0.53`). Some cloud and VPS images ship a fixed file with
+the provider's DNS servers instead, so `.sesh` lookups never reach systemd-resolved. Check, and
+if `127.0.0.53` is missing, link it back (your normal DNS servers keep working through resolved):
+
+```sh
+grep nameserver /etc/resolv.conf   # should show 127.0.0.53
+sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf   # only if it does not
+```
+
 Only `.sesh` and `.snode` names go to Session Router; all other DNS is unchanged. Then check that
 its API is listening on `127.0.0.1:1190` and `.sesh` names resolve:
 
@@ -126,10 +136,13 @@ tells you what to fix.
 ### 3. First run
 
 ```sh
-srnet key new     # create your wallet (encrypted; back up the file and passphrase)
+srnet key new     # create your wallet; asks you to choose a keystore passphrase (back up the file and passphrase)
 srnet doctor      # check Session Router, DNS, the demo hosts and your wallet
 srnet ui          # open the app in your browser
 ```
+
+`srnet key new` asks for a keystore passphrase twice. It encrypts your wallet file; you need it
+whenever you use the wallet, and it cannot be recovered if lost.
 
 The app opens with the demo lobby, directory and mail already joined.
 

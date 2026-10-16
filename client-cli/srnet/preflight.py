@@ -132,14 +132,38 @@ def c_router():
              else "start session-router (API on 127.0.0.1:1190) and give it a minute")
 
 
+def _linux_dns_hint() -> str:
+    """Why Linux .sesh lookups fail, from resolv.conf and resolvectl (read-only)."""
+    try:
+        rc = os.path.realpath("/etc/resolv.conf")
+        txt = open("/etc/resolv.conf", encoding="utf-8", errors="replace").read()
+    except OSError:
+        rc, txt = "", ""
+    if "127.0.0.53" not in txt and "/run/systemd/resolve/" not in rc:
+        return ("/etc/resolv.conf does not use systemd-resolved, so .sesh never reaches Session Router: "
+                "sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf (README step 1)")
+    try:
+        out = subprocess.run(["resolvectl", "status", "sr-tun0"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    if "127.3.2.1" not in out or "~sesh" not in out:
+        return ("sr-tun0 has no .sesh DNS: add the session-router-client dns.conf drop-in from README step 1, "
+                "then sudo systemctl daemon-reload && sudo systemctl restart session-router-client")
+    return "resolvectl looks right; check that session-router-client is running (systemctl status session-router-client)"
+
 def c_dns():
     try:
         infos = socket.getaddrinfo("localhost.sesh", 80, proto=socket.IPPROTO_TCP)
         return "PASS", "localhost.sesh -> " + infos[0][4][0], ""
     except OSError as e:
-        rule = _ps("(Get-DnsClientNrptRule | Where-Object Comment -eq 'SRNet').Namespace") if WIN else ""
-        return "FAIL", f"no .sesh lookup ({e}); NRPT rule: {rule or 'missing'}", \
-            "reinstall SRNet (it adds the .sesh DNS rule); a VPN or DNS filter may be overriding it"
+        if WIN:
+            rule = _ps("(Get-DnsClientNrptRule | Where-Object Comment -eq 'SRNet').Namespace")
+            return "FAIL", f"no .sesh lookup ({e}); NRPT rule: {rule or 'missing'}", \
+                "reinstall SRNet (it adds the .sesh DNS rule); a VPN or DNS filter may be overriding it"
+        if sys.platform == "darwin":
+            return "FAIL", f"no .sesh lookup ({e})", \
+                "point .sesh lookups at 127.3.2.1 (see the Session Router install guide)"
+        return "FAIL", f"no .sesh lookup ({e})", _linux_dns_hint()
 
 
 def c_demo():

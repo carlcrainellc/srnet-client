@@ -33,10 +33,12 @@ def _client(data) -> MailClient:
     try:  # shipped first contacts (and the user's client.json next to the data dir)
         from .clientconfig import load
         uc = d.parent / "client.json"
-        contacts = load(uc if uc.exists() else None)["mail"].get("contacts", [])
+        mcfg = load(uc if uc.exists() else None)["mail"]
+        contacts, hosts = mcfg.get("contacts", []), mcfg.get("hosts", [])
     except Exception:
-        contacts = []
-    return MailClient(d / "mail", kp.read_bytes(), contacts=contacts)
+        contacts, hosts = [], []
+    # same default mail host as the app (default-client.json), used until you set your own
+    return MailClient(d / "mail", kp.read_bytes(), hosts, contacts=contacts)
 
 
 def main(argv=None) -> int:
