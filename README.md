@@ -38,6 +38,7 @@ srnet mail name 'srnet://room/...' "Bob's room"              # local petname for
   ChaCha20-Poly1305) and padded to a size bucket (1 KiB to 64 KiB). A mail host sees only
   the recipient key, the message id, the padded size and the time.
 - Messages go to every host on the recipient's list; your client drops duplicates.
+- New installs start with one contact, **SRNet** (the team inbox): `srnet mail send SRNet -s "Hi" -m "..."`.
 - Hosts keep mail 7 days by default (30 at most) and delete it only after your client has saved it and acknowledged it (fetch, then ack). Mail that is never acknowledged is deleted when it expires. Your
   client keeps it sealed on disk and opens it only to show it.
 - Reading an inbox needs a fresh signed challenge from the owner's key. Nobody else can list

@@ -3,7 +3,7 @@
 Layering rules
 - collections merge by id: a user entry with the same id replaces the shipped one,
   {"id": X, "disabled": true} drops it, new ids are added after the shipped ones.
-- mail: user keys override shipped keys; a user "hosts" list replaces the shipped list.
+- mail: user keys override shipped keys; a user "hosts" or "contacts" list replaces the shipped list.
 - every other top-level key: the user value wins.
 Shipped entries that still carry a REPLACE-ME placeholder, or a root_pin that isn't 64 hex,
 are skipped, so an unconfigured build starts with an empty sidebar instead of errors.
@@ -49,6 +49,10 @@ def merge(defaults: dict, user: dict | None) -> dict:
     out["collections"] = [c for c in colls.values() if _usable(c)]
     mail = dict(defaults.get("mail") or {}, **(user.get("mail") or {}))
     mail["hosts"] = [h for h in mail.get("hosts", []) if isinstance(h, str) and not _has_placeholder(h)]
+    if "contacts" in mail:
+        mail["contacts"] = [c for c in mail["contacts"] if isinstance(c, dict)
+                            and isinstance(c.get("link"), str) and not c.get("disabled")
+                            and not _has_placeholder(c)]
     out["mail"] = mail
     return out
 

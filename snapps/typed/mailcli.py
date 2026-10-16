@@ -30,7 +30,13 @@ def _client(data) -> MailClient:
     if not kp.exists():
         with open(os.open(kp, os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600), "wb") as f:
             f.write(os.urandom(32))
-    return MailClient(d / "mail", kp.read_bytes())
+    try:  # shipped first contacts (and the user's client.json next to the data dir)
+        from .clientconfig import load
+        uc = d.parent / "client.json"
+        contacts = load(uc if uc.exists() else None)["mail"].get("contacts", [])
+    except Exception:
+        contacts = []
+    return MailClient(d / "mail", kp.read_bytes(), contacts=contacts)
 
 
 def main(argv=None) -> int:

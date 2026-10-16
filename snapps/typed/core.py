@@ -176,7 +176,8 @@ class Core:
         # mail: same identity as posting (author.key); sealed store under <data>/mail
         self.mail = MailClient(self.dir / "mail", kp.read_bytes(),
                                (config.get("mail") or {}).get("hosts", []), clock=clock,
-                               attacher=self.mail_attach)
+                               attacher=self.mail_attach,
+                               contacts=(config.get("mail") or {}).get("contacts", []))
 
     def save(self):
         with self.lock:

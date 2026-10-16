@@ -19,7 +19,7 @@ FOLDERS = ("inbox", "requests")
 
 class MailClient:
     def __init__(self, data_dir, seed: bytes, hosts=(), clock=time.time, http=http_json,
-                 attacher=None):
+                 attacher=None, contacts=()):
         self.dir = Path(data_dir)
         (self.dir / "msgs").mkdir(parents=True, exist_ok=True)
         self.key = F.key_from_seed(seed)
@@ -28,13 +28,32 @@ class MailClient:
         self.clock, self.http = clock, http
         self.attacher = attacher  # (bytes, filename, mime) -> encrypted file-drop link
         self.st = {"hosts": [], "contacts": {}, "petnames": {}, "index": {}, "blocked": [],
-                   "host_ids": {}}
+                   "host_ids": {}, "seeded": []}
         p = self.dir / "mail.json"
         if p.exists():
             self.st.update(json.loads(p.read_text(encoding="utf-8")))
         if hosts and not self.st["hosts"]:
             self.set_hosts(list(hosts), save=False)
+        self.seed_contacts(contacts)
         self.save()
+
+    def seed_contacts(self, contacts):
+        """Shipped first contacts (config mail.contacts): each is added once, so a contact the
+        user later removes or renames stays that way. Tags reach hosts on the next register()."""
+        for c in contacts or ():
+            try:
+                env, suggested = M.parse_link(c["link"])
+                card = M.verify_card(env)
+            except Exception:
+                continue  # a bad shipped card is skipped, never fatal
+            ed = card["ed"]
+            if ed in self.st["seeded"] or ed == self.me:
+                continue
+            self.st["seeded"].append(ed)
+            if ed in self.st["contacts"] or ed in self.st["blocked"]:
+                continue
+            self.st["contacts"][ed] = {"x": card["x"], "hosts": card["hosts"], "ts": card["ts"]}
+            self.st["petnames"].setdefault(f"srnet://mail/{ed}", str(c.get("name") or suggested or "")[:64] or ed[:12])
 
     def save(self):
         p = self.dir / "mail.json"
