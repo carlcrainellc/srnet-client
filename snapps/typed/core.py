@@ -965,15 +965,24 @@ def make_handler(core: Core, test_mode=False):
                 return self._json(404, {"ok": False, "err": "unknown wallet call"})
             req = urllib.request.Request(f"{base}/api/{call}", data=raw or b"{}", method="POST",
                                          headers={"Content-Type": "application/json", "X-CSRF-Token": tok})
-            try:
-                # Board fetch needs Session Router; fail fast so Exits doesn't spin forever.
-                to = 18 if call == "board" else 600  # under the shell's 20s AbortController
-                with urllib.request.urlopen(req, timeout=to) as r:
-                    body = r.read(1 << 22)
-            except urllib.error.HTTPError as e:
-                body = e.read(1 << 16)
-            except OSError as e:
-                body = json.dumps({"ok": False, "err": "wallet backend: " + str(e)[:200]}).encode()
+            def fetch():
+                try:
+                    with urllib.request.urlopen(req, timeout=to) as r:
+                        return r.read(1 << 22)
+                except urllib.error.HTTPError as e:
+                    return e.read(1 << 16)
+                except OSError as e:
+                    return json.dumps({"ok": False, "err": "wallet backend: " + str(e)[:200]}).encode()
+            # Board fetch needs Session Router; a hard 18s wall-clock deadline (under the shell's 20s)
+            # so Exits never spins: urlopen's timeout is per socket read, not for the whole call.
+            to = 18 if call == "board" else 600
+            if call == "board":
+                box = []
+                t = threading.Thread(target=lambda: box.append(fetch()), daemon=True)
+                t.start(); t.join(to)
+                body = box[0] if box else json.dumps({"ok": False, "err": "timed out"}).encode()
+            else:
+                body = fetch()
             return self._send(200, body, "application/json; charset=utf-8")
 
         def _api_ok(self):

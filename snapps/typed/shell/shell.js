@@ -240,27 +240,39 @@ const W = (() => {
     const r = await call(name, Object.assign({passphrase: pw || null, client_sesh: $("x-cs").value.trim()}, extra));
     log((r.ok ? "ok " : "failed ") + (r.err || "") + (r.out ? "\n" + r.out : "")); await status(pw); return r;
   }
+  // One deadline for every board load (first visit and Refresh): the fetch is aborted and the
+  // message shown at 20s even if the abort or the body read never settles.
+  const BOARD_DEADLINE_MS = 20000;
+  const BOARD_TIMEOUT_MSG = "Couldn't load the exit board (timed out). Try Refresh.";
+  let boardGen = 0;
+  function boardErr(err) {
+    const m = String(err || "unknown error");
+    if (/timed? ?out|timeout|AbortError/i.test(m)) return BOARD_TIMEOUT_MSG;
+    if (/wallet not running/i.test(m)) return m;
+    return "Couldn't load the exit board (" + m.replace(/^wallet backend:\s*/i, "") + "). Try Refresh.";
+  }
   async function board() {
-    $("x-boardinfo").textContent = "loading the signed exit board…";
+    const gen = ++boardGen;
+    $("x-boardinfo").textContent = "Loading the signed exit board…";
     const tb = $("x-board").querySelector("tbody"); tb.replaceChildren();
     const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = setTimeout(() => { if (ac) ac.abort(); }, 20000);
+    let timer = null;
+    const deadline = new Promise((_, rej) => { timer = setTimeout(() => {
+      if (ac) ac.abort(); rej(Object.assign(new Error("timed out"), {name: "AbortError"})); }, BOARD_DEADLINE_MS); });
     let r;
     try {
       const opt = {method: "POST", headers: {"X-Core": "1", "Content-Type": "application/json"}, body: "{}"};
       if (ac) opt.signal = ac.signal;
-      const resp = await fetch("/api/wallet/board", opt);
-      r = await resp.json();
+      r = await Promise.race([fetch("/api/wallet/board", opt).then((resp) => resp.json()), deadline]);
     } catch (e) {
       clearTimeout(timer);
-      const aborted = ac && e && e.name === "AbortError";
-      $("x-boardinfo").textContent = aborted
-        ? "board unavailable: timed out after 20s — is Session Router running, and can it reach the exit board?"
-        : "board unavailable: " + (e && e.message ? e.message : e);
+      if (gen !== boardGen) return;
+      $("x-boardinfo").textContent = boardErr(e && e.name === "AbortError" ? "timed out" : (e && e.message ? e.message : e));
       return;
     }
     clearTimeout(timer);
-    if (!r.ok) { $("x-boardinfo").textContent = "board unavailable: " + (r.err || "unknown error"); return; }
+    if (gen !== boardGen) return;
+    if (!r.ok) { $("x-boardinfo").textContent = boardErr(r.err); return; }
     $("x-boardinfo").textContent = "signed board seq " + r.seq + " from " + r.source + (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.listings.length ? "" : " · no sellers listed right now");
     for (const l of r.listings) {
       const tr = el("tr"); [l.seller, l.region || "-", l.price, ago(l.age_s)].forEach((t) => tr.appendChild(el("td", t)));

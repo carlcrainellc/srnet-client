@@ -27,7 +27,10 @@ class ShellCopy(unittest.TestCase):
     def test_board_timeout_abort(self):
         js = (SHELL / "shell.js").read_text()
         self.assertIn("AbortController", js)
-        self.assertIn("timed out after 20s", js)
+        self.assertIn("Couldn't load the exit board (timed out). Try Refresh.", js)
+        self.assertIn("BOARD_DEADLINE_MS = 20000", js)
+        self.assertIn("Promise.race", js)
+        self.assertNotIn("board unavailable", js)
         self.assertIn("x-cs-hint", (SHELL / "shell.html").read_text())
 
 if __name__ == "__main__":
