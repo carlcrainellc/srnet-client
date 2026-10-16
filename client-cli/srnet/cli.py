@@ -99,7 +99,22 @@ def cmd_exits(args, st: state.State) -> int:
     if not board:
         print("(no valid listings)")
         return 0
+    def _ours(d):
+        L = d["listing"]
+        try:
+            known = chain.DEPLOYMENTS.get(int(L["chainid"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+        return bool(known) and str(L.get("contract", "")).lower() == known.lower()
+    stale = [d for d in board if not _ours(d)]
+    board = [d for d in board if _ours(d)]
     print("Exit marketplace: Beta / Untested. Not production-certified; buy one hour at a time.", file=sys.stderr)
+    if stale:
+        print(f"{len(stale)} listing(s) hidden: they point at another payment contract and can't be bought "
+              "from this client", file=sys.stderr)
+    if not board:
+        print("(no buyable listings right now)")
+        return 0
     print(boardmod.table(board, time.time()))
     return 0
 
@@ -121,7 +136,6 @@ def cmd_buy(args, st: state.State) -> int:
             print("could not read your .sesh address from Session Router (is .sesh DNS working? run "
                   "srnet doctor); or pass --client-sesh ADDRESS.sesh", file=sys.stderr)
             return 1
-    warning.ensure_ack(st.root)
     cfg = _cfg(st)
     try:
         board = load_listings(args, st)
@@ -140,6 +154,7 @@ def cmd_buy(args, st: state.State) -> int:
         print(f"refusing: listing points at {L['contract']}, not the SRNetBalance deployment on "
               f"{_chain_name(cid)} ({known})", file=sys.stderr)
         return 1
+    warning.ensure_ack(st.root)  # after the listing checks, so a refused buy doesn't ask first
     if cid in chain.MAINNET_CHAINS:
         print("note: Arbitrum One, real USDC. The contract is unaudited; keep amounts small.", file=sys.stderr)
     # Build chain client
