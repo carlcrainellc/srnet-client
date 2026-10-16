@@ -56,7 +56,17 @@ class Deliver(unittest.TestCase):
 
     def test_url_from_signed_listing(self):
         self.assertEqual(D.claim_url({"seller": SELLER}), f"http://{SELLER}:8650/v1/claim")
+        
         self.assertEqual(D.claim_url(self.listing), f"http://{SELLER}:{self.listing['claim_port']}/v1/claim")
+        # Prefer signed claim_url from seller pack when present.
+        cu = "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.sesh/claim"
+        self.assertEqual(D.claim_url({"seller": SELLER, "claim_url": cu}), cu)
+        self.assertEqual(
+            D.claim_url({"seller": SELLER, "claim_url": cu.replace("/claim", "/v1/claim")}),
+            cu.replace("/claim", "/v1/claim"),
+        )
+        with self.assertRaises(ValueError):
+            D.claim_url({"seller": SELLER, "claim_url": "http://evil.example/claim"})
         with self.assertRaises(ValueError):
             D.claim_url({"seller": "evil.example.com"})
 

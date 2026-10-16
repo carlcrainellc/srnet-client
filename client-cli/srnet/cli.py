@@ -207,7 +207,7 @@ def cmd_buy(args, st: state.State) -> int:
         "chainid": cid, "vendor_id": L["vendor_id"], "amount": amount, "user": user,
         "rate_per_hour": rate, "hours": hours,
         "claim_path": str(claim_path), "delivery": delivery,
-        "listing": {k: L.get(k) for k in ("seller", "claim_port")},
+        "listing": {k: L.get(k) for k in ("seller", "claim_port", "claim_url") if L.get(k) is not None},
     }
     st.data["lease"] = {"seller": args.seller, "contract": L["contract"].lower(), "chainid": cid,
                         "current": hold_id, "renewed_from": [], "auto_renew": not args.no_auto_renew,

@@ -1,8 +1,11 @@
 """Deliver a buyer's signed lease claim to the seller over Session Router.
 
-The address comes only from the seller's *signed* listing: http://<listing seller .sesh>:<claim_port>/v1/claim
-(claim_port defaults to 8650). Delivery is retried with backoff; the seller's receiver is
-idempotent, so re-sending is always safe. Returns the seller's acknowledgment:
+Prefer the listing's signed `claim_url` when present (seller pack publishes
+`http://<claim-host>.sesh/claim`). Otherwise fall back to
+`http://<listing seller .sesh>:<claim_port>/v1/claim` (claim_port defaults to 8650).
+
+Delivery is retried with backoff; the seller's receiver is idempotent, so re-sending
+is always safe. Returns the seller's acknowledgment:
   {"delivered": bool, "status": "queued"|"admitted"|"rejected"|"conflict"|"undelivered", "reason": ...}
 If delivery fails the claim stays in the local spool and `srnet deliver` retries it later.
 """
@@ -10,13 +13,31 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import time
 import urllib.parse
 
 DEFAULT_CLAIM_PORT = 8650
+# http://<52 z-base32>.sesh[:port]/claim  or  .../v1/claim
+_CLAIM_URL_RE = re.compile(
+    r"^http://([a-z0-9]{52}\.sesh)(?::(\d{1,5}))?(/claim|/v1/claim)$"
+)
 
 
 def claim_url(listing: dict) -> str:
+    """Build the claim POST URL from a signed listing body."""
+    raw = (listing.get("claim_url") or "").strip()
+    if raw:
+        m = _CLAIM_URL_RE.match(raw)
+        if not m:
+            raise ValueError("listing claim_url is not a usable .sesh claim endpoint")
+        host, port, path = m.group(1), m.group(2), m.group(3)
+        if port:
+            p = int(port)
+            if not (1 <= p <= 65535):
+                raise ValueError("listing claim_url has a bad port")
+            return f"http://{host}:{p}{path}"
+        return f"http://{host}{path}"
     seller = listing["seller"]
     port = int(listing.get("claim_port") or DEFAULT_CLAIM_PORT)
     if not (seller.endswith(".sesh") and 1 <= port <= 65535):
@@ -79,8 +100,8 @@ def deliver(claim: dict, listing: dict, *, transport=http_transport, attempts: i
             while time.monotonic() < end and st == "queued":
                 sleep(poll)
                 try:
-                    _, g = (transport(f"{url}/{claim['hold_id']}", None, dns=dns) if transport is http_transport
-                            else transport(f"{url}/{claim['hold_id']}", None))
+                    _, g = (transport(f"{url.rstrip('/')}/{claim['hold_id']}", None, dns=dns) if transport is http_transport
+                            else transport(f"{url.rstrip('/')}/{claim['hold_id']}", None))
                     st, r = g.get("status", st), g
                 except (OSError, ValueError):
                     break
