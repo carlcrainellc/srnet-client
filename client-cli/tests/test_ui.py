@@ -147,6 +147,7 @@ class UiTest(unittest.TestCase):
         code, r = self.post("/api/status", {})
         self.assertTrue(r["ok"])
         self.assertIsNone(r["address"])
+        self.assertFalse(r.get("unlocked"))
         self.assertNotIn("deposited", r)
 
     def test_unknown_path(self):

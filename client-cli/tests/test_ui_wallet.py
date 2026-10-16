@@ -89,6 +89,9 @@ class WalletUiTest(unittest.TestCase):
             page = r.read().decode()
         for t in ("SNApps", "Exits", "Wallet / Top up"):
             self.assertIn(t, page)
+        self.assertIn("I've sent USDC — deposit now", page)
+        self.assertIn("Unlock to see balances", page)
+        self.assertNotIn("Deposit when it arrives", page)
 
 
 if __name__ == "__main__":

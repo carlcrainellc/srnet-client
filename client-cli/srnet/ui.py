@@ -67,7 +67,8 @@ class Backend:
         out = {"address": keys.address_of(self._keystore()), "connected": (d.get("connected") or {}).get("seller"),
                "seller": lease.get("seller"), "auto_renew": bool(lease.get("auto_renew")),
                "renewer_running": bool(self.renewer and self.renewer.poll() is None),
-               "client_sesh": self.cfg().get("client_sesh") or lease.get("client_sesh") or ""}
+               "client_sesh": self.cfg().get("client_sesh") or lease.get("client_sesh") or "",
+               "unlocked": False}
         if passphrase:
             pk = keys.unlock(self._keystore(), passphrase)
             ch = chain.ChainCfg(rpc=self._rpc(), contract=self.cfg().get("contract") or chain.DEFAULT_CONTRACT,
@@ -75,6 +76,7 @@ class Backend:
             ch.chainid()
             out["usdc_wallet"] = ch.usdc_balance() / 1e6
             out["deposited"] = ch.available() / 1e6
+            out["unlocked"] = True
             if lease.get("current"):
                 ch.contract = lease["contract"]
                 cur = chain.newest_lease(ch, int(lease["current"]))

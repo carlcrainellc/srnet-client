@@ -34,8 +34,12 @@ class WalletTabs(unittest.TestCase):
         self.calls = []
         self.be.board = lambda: {"seq": 7, "source": "test", "dropped": 0, "listings": [
             {"seller": SELLER, "region": "us-east", "price": "0.10", "age_s": 300}]}
-        self.be.status = lambda pw=None: {"address": ADDR, "usdc_wallet": 12.5, "deposited": 3, 
-                                          "seller": None, "connected": None, "auto_renew": False}
+        def status(pw=None):
+            out = {"address": ADDR, "seller": None, "connected": None, "auto_renew": False, "unlocked": False}
+            if pw:
+                out.update({"usdc_wallet": 12.5, "deposited": 3, "unlocked": True})
+            return out
+        self.be.status = status
 
         def buy(*a):
             self.calls.append(("buy",) + a)
@@ -61,6 +65,8 @@ class WalletTabs(unittest.TestCase):
             pg.on("pageerror", lambda e: errs.append(str(e)))
             pg.goto(self.base)
             pg.wait_for_selector("#home:not([hidden])", timeout=20000)  # opens on Home
+            tip = pg.get_attribute("#modtoggle", "title") or ""
+            self.assertIn("host has hidden", tip.lower())
             # Exits: board renders natively; Buy asks for the passphrase and says final; Cancel sends nothing
             pg.click("#ribbon button[data-b=exits]")
             pg.wait_for_selector("#x-board tbody tr", timeout=15000)
@@ -80,10 +86,21 @@ class WalletTabs(unittest.TestCase):
             pg.click("#sheet-buttons button:has-text('Buy (final)')")
             wait_text(pg, "#x-log", lambda t: "ok" in t)
             self.assertEqual(self.calls[0][1:], (SELLER, "y" * 52 + ".sesh", False, "pw123"))
-            # Wallet: balances + top-up QR info with the USDC-only warning
+            # Wallet: locked empty state (no posting key), Unlock loads balances, deposit CTA renamed
             pg.click("#ribbon button[data-b=wallet]")
             self.assertTrue(pg.is_visible("#wallet"))
+            self.assertNotIn("posting key", pg.inner_text("#wallet").lower())
+            # status() without passphrase clears any balances left from the buy step
+            wait_text(pg, "#w-usdc", lambda t: "Unlock to see balances" in t)
+            self.assertTrue(pg.is_visible("#w-unlock"))
+            self.assertIn("I've sent USDC", pg.inner_text("#w-topup"))
+            pg.click("#w-unlock")
+            pg.wait_for_selector("#sheet:not([hidden])")
+            pg.fill("#sheet-pw", "pw123")
+            pg.click("#sheet-buttons button:has-text('Unlock')")
+            wait_text(pg, "#w-usdc", lambda t: "12.50" in t)
             self.assertIn("12.50", pg.inner_text("#w-usdc"))
+            self.assertIn("3.00", pg.inner_text("#w-dep"))
             with mock.patch("srnet.keys.address_of", return_value=ADDR):
                 pg.click("#w-showqr")
                 wait_text(pg, "#w-warn", bool)

@@ -966,7 +966,9 @@ def make_handler(core: Core, test_mode=False):
             req = urllib.request.Request(f"{base}/api/{call}", data=raw or b"{}", method="POST",
                                          headers={"Content-Type": "application/json", "X-CSRF-Token": tok})
             try:
-                with urllib.request.urlopen(req, timeout=600) as r:
+                # Board fetch needs Session Router; fail fast so Exits doesn't spin forever.
+                to = 25 if call == "board" else 600
+                with urllib.request.urlopen(req, timeout=to) as r:
                     body = r.read(1 << 22)
             except urllib.error.HTTPError as e:
                 body = e.read(1 << 16)

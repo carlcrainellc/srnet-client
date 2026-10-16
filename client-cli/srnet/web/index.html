@@ -64,8 +64,8 @@
   <section>
     <h2>Wallet</h2>
     <table class="kv">
-      <tr><th>SRNet balance</th><td id="dep">-</td></tr>
-      <tr><th>USDC waiting in wallet</th><td id="usdc">-</td></tr>
+      <tr><th>SRNet balance</th><td id="dep">Unlock to see balances</td></tr>
+      <tr><th>USDC waiting in wallet</th><td id="usdc">Unlock to see balances</td></tr>
       <tr><th>Wallet address</th><td id="addr">-</td></tr>
     </table>
   </section>
@@ -77,12 +77,12 @@
     <img id="qr" alt="" width="240" height="240" hidden>
     <p class="small" id="uri"></p>
     <p>Send USDC on Arbitrum One to the address above (scan the QR with a phone wallet, or paste the address into
-      any exchange or wallet). Then press <b>Deposit when it arrives</b>: the client waits for the USDC, signs a
+      any exchange or wallet). Then press <b>I've sent USDC — deposit now</b>: the client waits for the USDC, signs a
       gas-free approval, and a relayer moves it into your SRNet balance. Payments, renewals and cash-outs then go
       through the same relayer, so you never need ETH.</p>
     <label>Relayer URL (set once) <input id="relayer" size="40" spellcheck="false" placeholder="https://relayer.example"></label>
     <button id="saverelayer">Save</button>
-    <button id="topup">Deposit when it arrives</button>
+    <button id="topup">I've sent USDC — deposit now</button>
     <p class="small" id="topupstate"></p>
   </section>
 </div>

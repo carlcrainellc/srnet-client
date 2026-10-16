@@ -55,8 +55,13 @@ async function loadStatus() {
   if (!r.ok) { log("status: " + r.err); }
   const f = (v, d) => (v === undefined || v === null) ? "-" : Number(v).toFixed(d);
   $("addr").textContent = r.address || "no keystore (run srnet key new)";
-  $("usdc").textContent = f(r.usdc_wallet, 2);
-  $("dep").textContent = f(r.deposited, 2);
+  if (r.unlocked || r.usdc_wallet !== undefined || r.deposited !== undefined) {
+    $("usdc").textContent = f(r.usdc_wallet, 2);
+    $("dep").textContent = f(r.deposited, 2);
+  } else {
+    $("usdc").textContent = "Unlock to see balances";
+    $("dep").textContent = "Unlock to see balances";
+  }
   $("seller").textContent = r.seller || "-";
   $("conn").textContent = r.connected ? "yes (" + r.connected.slice(0, 12) + "...)" : "no";
   $("ar").checked = !!r.auto_renew;

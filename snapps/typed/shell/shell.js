@@ -164,7 +164,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   frame = $("tpl"); S = await api("collections");
   document.querySelectorAll("#ribbon button").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.b === "home") { show("home"); ribbon("home"); }
-    else if (b.dataset.b === "wallet") { cur = null; show("wallet"); ribbon("wallet"); $("wallet-keys").textContent = "posting key: " + S.me; W.status(); }
+    else if (b.dataset.b === "wallet") { cur = null; show("wallet"); ribbon("wallet"); W.status(); }
     else { cur = null; show("exits"); ribbon("exits"); W.board(); W.status(); } }));
   W.wire();
   $("preflight-go").addEventListener("click", async () => {
@@ -177,7 +177,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("join-go").addEventListener("click", () => joinFlow($("joinlink").value.trim()));
   $("joinlink").addEventListener("keydown", (e) => { if (e.key === "Enter") joinFlow($("joinlink").value.trim()); });
   setInterval(side, 10000);
-  $("modtoggle").addEventListener("click", async () => { const on = $("modtoggle").dataset.on === "1"; await api("moderation", {mode: on ? "honour" : "ignore"}); $("modtoggle").dataset.on = on ? "0" : "1"; $("modtoggle").textContent = on ? "Show host-hidden" : "Honour host hides"; push(); });
+  $("modtoggle").addEventListener("click", async () => {
+    const on = $("modtoggle").dataset.on === "1";
+    await api("moderation", {mode: on ? "honour" : "ignore"});
+    $("modtoggle").dataset.on = on ? "0" : "1";
+    $("modtoggle").textContent = on ? "Show host-hidden" : "Honour host hides";
+    const tip = on
+      ? "Shows posts and files the host has hidden, so you can still read them. Off by default: the client honours host hides."
+      : "Currently showing host-hidden posts and files. Click to honour host hides again.";
+    $("modtoggle").title = tip;
+    if ($("modhint")) $("modhint").title = tip;
+    push();
+  });
   $("send-file").addEventListener("click", async () => { const f = $("file").files[0]; if (!f) return;
     const prev = $("upload").dataset.prev || ""; delete $("upload").dataset.prev;
     const q = "upload?c=" + encodeURIComponent(cur.name) + "&name=" + encodeURIComponent(f.name) + "&mime=" + encodeURIComponent(f.type || "application/octet-stream") + "&note=" + encodeURIComponent($("note").value) + "&mode=" + encodeURIComponent($("mode").value) + "&to=" + encodeURIComponent($("to").value) + (prev ? "&prev=" + encodeURIComponent(prev) : "");
@@ -205,7 +216,16 @@ const W = (() => {
   }
   function fill(r) {
     $("w-addr").textContent = r.address || "no keystore (run srnet key new)";
-    $("w-usdc").textContent = fmt(r.usdc_wallet, 2); $("w-dep").textContent = fmt(r.deposited, 2);
+    const unlocked = !!(r.unlocked || r.usdc_wallet !== undefined || r.deposited !== undefined);
+    if (unlocked) {
+      $("w-usdc").textContent = fmt(r.usdc_wallet, 2); $("w-dep").textContent = fmt(r.deposited, 2);
+      if ($("w-unlock")) $("w-unlock").hidden = true;
+      if ($("w-balhint")) $("w-balhint").textContent = "Balances loaded. Your passphrase isn't saved.";
+    } else {
+      $("w-usdc").textContent = "Unlock to see balances"; $("w-dep").textContent = "Unlock to see balances";
+      if ($("w-unlock")) $("w-unlock").hidden = false;
+      if ($("w-balhint")) $("w-balhint").textContent = "Press Unlock and enter your passphrase to load balances. It isn't saved.";
+    }
     $("x-seller").textContent = r.seller || "-";
     $("x-conn").textContent = r.connected ? "yes (" + String(r.connected).slice(0, 12) + "…)" : "no";
     $("x-ar").checked = !!r.auto_renew;
@@ -220,8 +240,18 @@ const W = (() => {
   }
   async function board() {
     $("x-boardinfo").textContent = "loading the signed exit board…";
-    const r = await call("board"); const tb = $("x-board").querySelector("tbody"); tb.replaceChildren();
-    if (!r.ok) { $("x-boardinfo").textContent = "board unavailable: " + r.err; return; }
+    const tb = $("x-board").querySelector("tbody"); tb.replaceChildren();
+    let r;
+    try {
+      r = await Promise.race([
+        call("board"),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timed out after 20s — is Session Router running, and can it reach the exit board?")), 20000)),
+      ]);
+    } catch (e) {
+      $("x-boardinfo").textContent = "board unavailable: " + (e && e.message ? e.message : e);
+      return;
+    }
+    if (!r.ok) { $("x-boardinfo").textContent = "board unavailable: " + (r.err || "unknown error"); return; }
     $("x-boardinfo").textContent = "signed board seq " + r.seq + " from " + r.source + (r.dropped ? ", " + r.dropped + " dropped" : "") + (r.listings.length ? "" : " · no sellers listed right now");
     for (const l of r.listings) {
       const tr = el("tr"); [l.seller, l.region || "-", l.price, ago(l.age_s)].forEach((t) => tr.appendChild(el("td", t)));
@@ -254,14 +284,16 @@ const W = (() => {
   function wire() {
     if (!S.wallet) { $("x-boardinfo").textContent = "wallet not running: start SRNet with `srnet ui`"; }
     $("x-refresh").addEventListener("click", () => { board(); withPass("Refresh lease and balances?", "your passphrase unlocks the keystore for this read only", [], "Refresh", (pw) => status(pw)); });
-    $("w-refresh").addEventListener("click", () => withPass("Refresh balances?", "your passphrase unlocks the keystore for this read only", [], "Refresh", (pw) => status(pw)));
+    const unlockBal = () => withPass("Unlock balances?", "your passphrase unlocks the keystore for this read only; it isn't saved", [], "Unlock", (pw) => status(pw));
+    $("w-unlock").addEventListener("click", unlockBal);
+    $("w-refresh").addEventListener("click", () => withPass("Refresh balances?", "your passphrase unlocks the keystore for this read only; it isn't saved", [], "Refresh", (pw) => status(pw)));
     $("x-disconnect").addEventListener("click", () => act("disconnect", {}));
     $("x-ar").addEventListener("change", (e) => { const on = e.target.checked;
       if (!on) return act("autorenew", {on: false});
       e.target.checked = false; withPass("Turn on auto-renew?", "buys the next hour near the end of each lease; each hour is final", [], "Turn on", (pw) => act("autorenew", {on: true}, pw)); });
     $("w-showqr").addEventListener("click", showQr);
     $("w-saverelayer").addEventListener("click", async () => { const r = await call("relayer", {url: $("w-relayer").value.trim()}); $("w-topupstate").textContent = r.ok ? "relayer saved" : r.err; });
-    $("w-topup").addEventListener("click", () => withPass("Deposit when it arrives?", "waits for the USDC, then a gas-free approval and the relayer deposit", ["amount: " + $("w-amt").value + " USDC"], "Start", async (pw) => {
+    $("w-topup").addEventListener("click", () => withPass("Deposit USDC into SRNet balance?", "waits for the USDC you sent, then a gas-free approval and the relayer deposit — no ETH needed", ["amount: " + $("w-amt").value + " USDC"], "Deposit now", async (pw) => {
       const r = await call("topup/start", {amount: $("w-amt").value, passphrase: pw});
       if (!r.ok) { $("w-topupstate").textContent = "top up: " + r.err; return; }
       if (!topupTimer) topupTimer = setInterval(pollTopup, 5000); pollTopup(); }));
