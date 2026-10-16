@@ -28,7 +28,7 @@ class MailClient:
         self.clock, self.http = clock, http
         self.attacher = attacher  # (bytes, filename, mime) -> encrypted file-drop link
         self.st = {"hosts": [], "contacts": {}, "petnames": {}, "index": {}, "blocked": [],
-                   "host_ids": {}, "seeded": []}
+                   "host_ids": {}, "seeded": [], "registered": []}
         p = self.dir / "mail.json"
         if p.exists():
             self.st.update(json.loads(p.read_text(encoding="utf-8")))
@@ -106,8 +106,28 @@ class MailClient:
                 self._auth(h, "register")
                 self._push_tags(h)
                 out[h] = "ok"
+                if h not in self.st.setdefault("registered", []):
+                    self.st["registered"].append(h)
             except Exception as e:
                 out[h] = f"error: {e}"
+        self.save()
+        return out
+
+    def ensure_registered(self) -> dict:
+        """Open an inbox on any host not yet registered (e.g. the shipped default host), so
+        people can write to you before you ever run `mail hosts`. Best effort; retried later."""
+        todo = [h for h in self.st["hosts"] if h not in self.st.setdefault("registered", [])]
+        out = {}
+        for h in todo:
+            try:
+                self._auth(h, "register")
+                self._push_tags(h)
+                self.st["registered"].append(h)
+                out[h] = "ok"
+            except Exception as e:  # noqa: BLE001
+                out[h] = f"error: {e}"
+        if out:
+            self.save()
         return out
 
     def _push_tags(self, h):
@@ -169,7 +189,9 @@ class MailClient:
 
     # ---- send ----
     def _resolve(self, to) -> dict:
-        if to.startswith("srnet://"):
+        if to.startswith("srnet://mail/") and to.rsplit("/", 1)[1] in self.st["contacts"]:
+            to = to.rsplit("/", 1)[1]  # a contact's bare address (no card query) is enough
+        elif to.startswith("srnet://"):
             env, sugg = M.parse_link(to)
             return M.verify_card(env)
         for k, n in self.st["petnames"].items():  # a petname works as an address
@@ -203,6 +225,7 @@ class MailClient:
 
     # ---- receive ----
     def fetch(self) -> dict:
+        self.ensure_registered()
         new, dups, rejected, errors = 0, 0, [], {}
         for h in self.st["hosts"]:
             try:

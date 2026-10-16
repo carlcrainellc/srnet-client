@@ -95,7 +95,22 @@ def c_wintun():
 
 def c_ports():
     if not WIN:
-        return ("WARN" if _listening(UI_PORT) else "PASS"), f"tcp {UI_PORT} {'in use' if _listening(UI_PORT) else 'free'}", ""
+        if not _listening(UI_PORT):
+            return "PASS", f"tcp {UI_PORT} free", ""
+        try:
+            who = subprocess.run(["ss", "-Hltnp", f"sport = :{UI_PORT}"], capture_output=True,
+                                 text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            who = ""
+        pid = who.split("pid=")[1].split(",")[0] if "pid=" in who else ""
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode() if pid else ""
+        except OSError:
+            cmd = ""
+        if "typed.core" in cmd:
+            return "PASS", f"tcp {UI_PORT} is the SRNet app (already running, pid {pid})", ""
+        return "WARN", f"tcp {UI_PORT} in use" + (f" by pid {pid}" if pid else ""), \
+            f"another program holds the app port {UI_PORT}; close it or run srnet ui --port N"
     out = _ps("Get-NetTCPConnection -State Listen -LocalPort 48920,1190 -ErrorAction SilentlyContinue | "
               "ForEach-Object { \"tcp:$($_.LocalAddress):$($_.LocalPort):$((Get-Process -Id $_.OwningProcess).ProcessName)\" }; "
               "Get-NetUDPEndpoint -LocalPort 53,1191 -ErrorAction SilentlyContinue | "

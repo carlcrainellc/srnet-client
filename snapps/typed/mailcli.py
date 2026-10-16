@@ -68,7 +68,12 @@ def main(argv=None) -> int:
             else:
                 print("\n".join(mc.st["hosts"]) or "(no mail hosts set)")
         elif a.c == "address":
-            print(mc.link(a.name))
+            link = mc.link(a.name)
+            for h, r in mc.ensure_registered().items():  # open your inbox on the default host
+                if r != "ok":
+                    print(f"note: inbox on {h} not opened yet ({r}); `srnet mail fetch` retries",
+                          file=sys.stderr)
+            print(link)
         elif a.c == "send":
             body = a.message if a.message is not None else sys.stdin.read()
             r = mc.send(a.to, a.subject, body, a.attach, ttl=a.ttl_days and a.ttl_days * 86400)
