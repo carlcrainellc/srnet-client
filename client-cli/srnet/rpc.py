@@ -7,7 +7,7 @@ from typing import Any
 
 
 class Rpc:
-    def __init__(self, endpoint: str = "tcp://127.0.0.1:1195", timeout_ms: int = 8000):
+    def __init__(self, endpoint: str = "tcp://127.0.0.1:1190", timeout_ms: int = 8000):
         self.endpoint = endpoint
         self.timeout_ms = timeout_ms
         import zmq  # imported here so non-router commands work without pyzmq
@@ -20,6 +20,9 @@ class Rpc:
         sock.setsockopt(zmq.LINGER, 0)
         sock.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
         sock.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+        # Session Router's OMQ expects a DEALER routing id; without one, replies time out
+        # as zmq.Again ("Resource temporarily unavailable") on map_exit / status.
+        sock.setsockopt(zmq.ROUTING_ID, f"srnet-{time.time_ns()}".encode())
         sock.connect(self.endpoint)
         try:
             tag = f"t{time.time_ns()}".encode()

@@ -483,7 +483,7 @@ def cmd_connect(args, st: state.State) -> int:
     resolv = Path(args.resolv or cfg.get("resolv") or (st.root / "resolv.conf"))
     doh.write_resolv(resolv)
 
-    endpoint = args.rpc_endpoint or cfg.get("omq") or "tcp://127.0.0.1:1195"
+    endpoint = args.rpc_endpoint or cfg.get("omq") or "tcp://127.0.0.1:1190"
     r = rpc.Rpc(endpoint)
     # Chain for release (payment is final; release = unmap + stop renewing, no chain call)
     if args.mock:
@@ -543,7 +543,7 @@ def _guess_wan() -> str:
 
 def cmd_status(args, st: state.State) -> int:
     cfg = _cfg(st)
-    endpoint = args.rpc_endpoint or cfg.get("omq") or "tcp://127.0.0.1:1195"
+    endpoint = args.rpc_endpoint or cfg.get("omq") or "tcp://127.0.0.1:1190"
     ks = killswitch.KillSwitch(tun=cfg.get("tun", "sr-tun"))
     info = {
         "pending_buy": st.data.get("pending_buy"),
@@ -563,7 +563,7 @@ def cmd_disconnect(args, st: state.State) -> int:
     cfg = _cfg(st)
     conn = st.data.get("connected") or {}
     seller = args.seller or conn.get("seller")
-    endpoint = args.rpc_endpoint or cfg.get("omq") or "tcp://127.0.0.1:1195"
+    endpoint = args.rpc_endpoint or cfg.get("omq") or "tcp://127.0.0.1:1190"
     if seller:
         try:
             rpc.Rpc(endpoint).unmap_exit(seller)
