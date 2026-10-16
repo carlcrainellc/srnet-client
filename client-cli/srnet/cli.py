@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """srnet: SNApps, exits and wallet for SRNet.
 
-  srnet doctor             check Python packages, RPC, chain, wallet and balances
+  srnet ui                 the app: SNApps, Exits (Beta), Wallet / Top up (also plain `srnet`)
+  srnet doctor             check Session Router, DNS, packages, chain, wallet, balance and relayer
   srnet exits              exit marketplace (Beta / Untested): list sellers from the signed board
   srnet buy <seller>       prepay 1 hour (default; --hours N) from your SRNet balance
   srnet connect <seller>   MapExit full_tunnel; if the exit is not EXIT_CAPABLE: unmap and stop renewing
@@ -14,8 +15,7 @@
   srnet pay --vendor-id V --amount N  pay any SRNet seller from your SRNet balance
   srnet cashout --amount N withdraw unused SRNet balance to your wallet
   srnet vendor --shop-key K  seller: bind a vendor id for SRNet-balance payments
-  srnet snapps [--config F] typed SNApps client (boards, rooms, wiki, shop, drop, pages)
-  srnet ui                 the app: SNApps, Exits, Wallet / Top up (also plain `srnet`)
+  srnet snapps             alias of `srnet ui` that doesn't open a browser
 
 GASLESS: fund with USDC on Arbitrum One (QR or any wallet). Set a relayer once ("relayer" in
 config.json or $SRNET_RELAYER); top-ups, payments, renewals and cash-outs then need no ETH.
@@ -28,7 +28,8 @@ auto-renew. Plain DNS is blocked. Turn on DNS-over-HTTPS in your browser, or nam
   srnet key new|import     create the encrypted wallet keystore ($SRNET_HOME/keystore.json)
 
 Settings come from flags, then $SRNET_HOME/config.json (keys: rpc, keystore, listings_path,
-board_urls, board_pin, sesh_dns, spool, omq, relayer), then env (SRNET_RPC), then the Arbitrum One default (https://arb1.arbitrum.io/rpc). The wallet key comes from the keystore; the passphrase is
+board_urls, board_pin, sesh_dns, spool, omq, relayer), then env (SRNET_RPC, SRNET_RELAYER), then the Arbitrum One
+default RPC (https://arb1.arbitrum.io/rpc). The wallet key comes from the keystore; the passphrase is
 prompted or read from SRNET_KEYSTORE_PASSWORD. Plaintext --private-key / SRNET_PRIVATE_KEY
 still work but print a warning. Arbitrum One uses real USDC: the contract is unaudited, keep
 amounts small.
@@ -255,7 +256,7 @@ def _chain_name(cid: int) -> str:
 
 
 def cmd_doctor(args, st: state.State) -> int:
-    """Setup preflight (Windows, router, DNS, demo, clock...) then what buy/connect need.
+    """Setup preflight (router, DNS, demo, clock...) then wallet, SRNet balance and relayer.
     Exit 0 if nothing failed. --setup-only skips the wallet/chain part."""
     from . import preflight
     rep = preflight.run(skip=tuple(args.skip or ()))
@@ -293,18 +294,18 @@ def cmd_doctor(args, st: state.State) -> int:
         board = listings.load_board(Path(lp))
         line(True if board else None, "listings", f"{len(board)} valid in {lp}")
     else:
-        line(None, "listings", "from the board (srnet exits)")
+        line(True, "listings", "from the signed board (srnet exits)")
     rpc_url = args.rpc or cfg.get("rpc") or os.environ.get("SRNET_RPC") or chain.DEFAULT_RPC
     try:
         pk, ksrc = keys.resolve(args, cfg, st.root, warn=False)
     except keys.KeyError_ as e:
         pk, ksrc = None, f"keystore locked: {e}"
-    line(bool(pk) or False, "key source", ksrc)
+    line(bool(pk) or False, "key source", ksrc + ("" if pk else "; create one with: srnet key new"))
     if not rpc_url:
         line(False, "rpc", "not set (--rpc, SRNET_RPC or config.json)")
     if not rpc_url or not pk:
         return 1
-    contract = args.contract or (board[0]["listing"]["contract"] if board else None)
+    contract = args.contract or cfg.get("contract") or (board[0]["listing"]["contract"] if board else None)
     want = int(board[0]["listing"]["chainid"]) if board else None
     try:
         ch = chain.ChainCfg(rpc=rpc_url, contract=contract or chain.DEFAULT_CONTRACT, private_key=pk, relayer=chain.relayer_url(cfg))
@@ -319,12 +320,13 @@ def cmd_doctor(args, st: state.State) -> int:
         rel = chain.relayer_url(cfg)
         line(True if rel else None, "relayer",
              rel or "not set; set it once (Wallet tab or \"relayer\" in config.json) for gas-free payments")
+        contract = contract or chain.DEPLOYMENTS.get(cid)
         if not contract:
             line(None, "contract", "unknown until a listing is loaded (or pass --contract)")
         else:
             line(True, "contract", f"{contract}, USDC {ch.usdc()}")
             usdc, allow, avail = ch.usdc_balance(), ch.allowance(), ch.available()
-            line(usdc > 0 or avail > 0 or None, "USDC in wallet", f"{usdc / 1e6:.2f}")
+            line(usdc > 0 or avail > 0 or None, "USDC waiting in wallet", f"{usdc / 1e6:.2f}")
             line(True, "SRNet balance", f"{avail / 1e6:.2f}" + ("" if avail else " (top up: srnet topup or the Wallet tab)"))
     except chain.ChainError as e:
         line(False, "chain", str(e))
@@ -548,7 +550,7 @@ def cmd_disconnect(args, st: state.State) -> int:
 
 
 def cmd_topup(args, st: state.State) -> int:
-    """Phone-wallet top-up: show QR of our own wallet, wait for USDC, sign permit + intent, relay."""
+    """Top up: show QR of our own wallet, wait for USDC, sign permit + intent, relay."""
     from . import gasless
     cfg = _cfg(st)
     rpc_url = args.rpc or cfg.get("rpc") or os.environ.get("SRNET_RPC") or chain.DEFAULT_RPC
@@ -778,7 +780,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", metavar="COMMAND")
     ap.set_defaults(port=48920, no_browser=False, rpc=None, config=None, data=None, legacy_page=False)
 
-    dr = sub.add_parser("doctor", help="check my setup (router, DNS, demo...) then packages, RPC, chain, wallet")
+    dr = sub.add_parser("doctor", help="check my setup (router, DNS, demo...) then packages, chain, wallet, SRNet balance, relayer")
     dr.add_argument("--setup-only", action="store_true", help="only the setup preflight")
     dr.add_argument("--report", help="report file (default %%LOCALAPPDATA%%\\SRNet\\preflight-report.txt)")
     dr.add_argument("--skip", action="append", help="skip a check by name (repeatable), e.g. --skip demo")

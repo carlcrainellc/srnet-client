@@ -50,6 +50,7 @@ if [ "$(uname -s)" = "Linux" ] && [ -d "$HOME/.local/share" ]; then
   sed "s#^Exec=.*#Exec=$BIN/srnet ui#" "$SRC/client-cli/srnet-ui.desktop" > "$HOME/.local/share/applications/srnet-ui.desktop"
   # srnet:// links open the client's join sheet (nothing joins until you click Join)
   sed "s#^Exec=.*#Exec=$BIN/srnet open %u#" "$SRC/client-cli/srnet-open.desktop" > "$HOME/.local/share/applications/srnet-open.desktop"
+  mkdir -p "$HOME/.config"
   command -v xdg-mime >/dev/null && xdg-mime default srnet-open.desktop x-scheme-handler/srnet || true
   command -v update-desktop-database >/dev/null && update-desktop-database "$HOME/.local/share/applications" || true
 fi

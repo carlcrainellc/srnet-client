@@ -79,7 +79,7 @@ _ERRORS = {
     "ZeroAmount": "amount must be more than zero",
     "Paused": "the contract is paused right now; try later",
     "LeaseTooLarge": "lease is over the per-lease cap; pick fewer hours",
-    "InsufficientAvailable": "not enough deposited balance for this lease; rerun with --fund",
+    "InsufficientAvailable": "not enough SRNet balance for this payment and relay fee; top up first",
     "VendorNotConfigured": "this seller has not registered its vendor id on the contract yet",
     "ZeroHours": "need at least one hour",
     "TooManyHours": "more hours than the contract allows",

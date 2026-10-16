@@ -94,7 +94,7 @@ class AbiAndSigning(unittest.TestCase):
 
     def test_explain_custom_error(self):
         data = "0x" + chain.selector("InsufficientAvailable()").hex()
-        self.assertIn("--fund", chain.explain_revert(data))
+        self.assertIn("top up first", chain.explain_revert(data))
         self.assertIsNone(chain.explain_revert("0x"))
 
 

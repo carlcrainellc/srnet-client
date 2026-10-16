@@ -130,7 +130,7 @@ else:
             res = json.loads(out); avail = int(res["available"]); ok = avail == 9_650_000
         except Exception:
             avail = None
-        check("phone-wallet top-up via relayer (anvil)", r.returncode == 0 and ok,
+        check("QR top-up via relayer (anvil)", r.returncode == 0 and ok,
               f"10 USDC sent -> credit {avail} base units (expect 9650000 = 10 - 3% - 0.05); {r.stderr.strip()[-200:]}")
     finally:
         av.terminate()

@@ -255,6 +255,6 @@ The SNApps client starts with Home, Exits and Wallet in the ribbon. Everything e
 - **Directories** (`directory` type): hosts list their own collection by signing a `directory.entry` with that
   collection's root key (`snapps/scripts/directory_entry.py`); entries signed by anyone else are ignored.
 - **Link handler**: `srnet open <link>` opens the join sheet in the running client. `install.sh` registers it for
-  `srnet://` on Linux (xdg), `install.ps1` per-user on Windows (HKCU). macOS needs an app bundle to own a URL scheme,
+  `srnet://` on Linux (xdg). macOS needs an app bundle to own a URL scheme,
   so there run `srnet open '<link>'` by hand.
 - Collections from an existing `client.json` still load, as pre-joined and trusted with their configured pin.

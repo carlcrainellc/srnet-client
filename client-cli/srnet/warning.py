@@ -6,6 +6,9 @@ from pathlib import Path
 WARNING = """\
 SRNet exit visibility warning
 =============================
+The exit marketplace is Beta / Untested: it works but is not
+production-certified. Keep amounts small.
+
 When you connect through an exit, the exit OPERATOR can see:
   • the destinations you reach (IP addresses and ports)
   • connection timing and approximate transfer sizes
@@ -19,7 +22,7 @@ won't resolve. The local nftables kill switch blocks clearnet TCP and DNS if
 the tunnel drops; other UDP to the internet stays open for the overlay, so apps using
 QUIC or WebRTC may bypass the exit.
 
-The on-chain fund fee (up to 3%) is taken when you fund and is NOT
+The deposit fee (up to 3%) is taken when you top up and is NOT
 returned on cash-out. Only unused available balance can be cashed out.
 
 Lease payments are FINAL once a lease starts: there is no buyer cancel and

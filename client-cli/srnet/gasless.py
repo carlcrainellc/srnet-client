@@ -1,7 +1,7 @@
-"""Gasless phone-wallet top-up.
+"""Gasless top-up and gasless SRNet-balance actions (no ETH needed).
 
 1. The client shows a QR (EIP-681 plain USDC transfer) of the user's OWN SRNet wallet address.
-2. The user sends USDC from any phone wallet. No ETH is needed anywhere.
+2. The user sends USDC from any phone or exchange wallet. No ETH is needed anywhere.
 3. When the USDC arrives, the client signs an EIP-2612 permit (USDC -> SRNetBalance) and an EIP-712
    Fund intent, and hands both to a relayer. The relayer calls SRNetBalance.fundWithPermit and is
    paid `relay_fee` USDC out of the deposit (capped on-chain by maxRelayFee).

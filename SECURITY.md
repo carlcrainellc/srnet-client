@@ -15,7 +15,7 @@ output. DNS (tcp/udp 53) is dropped explicitly before the WAN UDP rule that the
 overlay needs. The client doesn't change system DNS, and exits never forward
 port 53.
 
-The contract has no operator key. These are fixed at deploy: `maxPerLease`,
+The contract owner has no power over user balances. These are fixed at deploy: `maxPerLease`,
 `maxLeaseHours` (at most 720), `feeBps` (at most 300), `cfVault` and
 `maxRelayFee`. `cashOut` returns available balance only; the deposit fee is not
 refunded.
@@ -46,5 +46,10 @@ SECURITY.md.
 - The contract is unaudited and live on Arbitrum One with real USDC. Use
   small amounts. The client refuses chain ids other than Arbitrum One, Arbitrum
   Sepolia and the test chains.
+- Relayers submit signed intents (deposit, pay, renew, cash out) and pay the
+  gas. Each signature binds the amount, recipient, fee, nonce and deadline, so a
+  relayer can't redirect funds or overcharge. A relayer can refuse or delay a
+  request; the user can switch relayers or fall back to direct transactions.
+- The exit marketplace is Beta / Untested.
 - The buyer key is stored in an encrypted V3 keystore by default. Plaintext
   keys via flag or env still work and print a warning.
