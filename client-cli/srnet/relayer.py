@@ -1,6 +1,9 @@
-"""Minimal SRNet top-up relayer. Anyone may run one.
+"""Minimal SRNet relayer: pays the gas so users never need ETH. Anyone may run one.
 
-POST /fund  {chainid, contract, intent, sig, permit}  (as built by gasless.sign_topup)
+POST /fund      {chainid, contract, intent, sig, permit}  top-up (gasless.sign_topup -> fundWithPermit)
+POST /lease     {kind, chainid, contract, intent, sig}     pay a seller (gasless.sign_action -> startLeaseFor)
+POST /renew     {kind, chainid, contract, intent, sig}     next hour (renewFor)
+POST /withdraw  {kind, chainid, contract, intent, sig}     cash out (withdrawFor)
 
 It holds only its own gas key and its earned relay fees (credited inside SRNetBalance to
 payableOf[relayer]; withdraw with withdrawPayable). It never holds user USDC.
@@ -53,29 +56,35 @@ class GasBudget:
 
 
 class Relayer:
-    def __init__(self, ch, *, min_fee: int = 50_000, max_gas_per_tx: int = 2 * 10**14,
+    def __init__(self, ch, *, min_fee: int = 50_000, min_action_fee: int = 20_000, max_gas_per_tx: int = 2 * 10**14,
                  gas_budget_wei: int = 5 * 10**15, ip_limit=(10, 3600), owner_limit=(5, 3600), clock=time.time):
         self.ch, self.min_fee, self.max_gas_per_tx = ch, min_fee, max_gas_per_tx
+        self.min_action_fee = min_action_fee
         self.budget = GasBudget(gas_budget_wei, clock)
         self.by_ip, self.by_owner = RateLimiter(*ip_limit, clock), RateLimiter(*owner_limit, clock)
         self.lock = threading.Lock()
 
-    def handle(self, req: dict, ip: str = "?") -> tuple[int, dict]:
+    def handle(self, req: dict, ip: str = "?", kind: str = "fund") -> tuple[int, dict]:
         try:
             i = req["intent"]
-            owner = i["owner"]
+            if kind == "fund":
+                owner, min_fee = i["owner"], self.min_fee
+            elif kind in gasless.ACTION_TYPES and req.get("kind") == kind:
+                owner, min_fee = i["user" if kind == "withdraw" else "buyer"], self.min_action_fee
+            else:
+                return 400, {"error": "unknown action"}
             if int(req.get("chainid", -1)) != self.ch.chainid():
                 return 400, {"error": "wrong chain"}
             if req.get("contract", "").lower() != self.ch.contract.lower():
                 return 400, {"error": "unknown contract"}
-            if int(i["relayFee"]) < self.min_fee:
-                return 400, {"error": f"relay fee below this relayer's minimum {self.min_fee}"}
+            if int(i["relayFee"]) < min_fee:
+                return 400, {"error": f"relay fee below this relayer's minimum {min_fee}"}
             rel = i["relayer"].lower()
             if rel not in (gasless.ZERO, self.ch.address().lower()):
                 return 400, {"error": "intent is pinned to another relayer"}
             if int(i["deadline"]) < time.time() + 30:
                 return 400, {"error": "intent expires too soon"}
-            data = gasless.encode_fund_call(req)
+            data = gasless.encode_fund_call(req) if kind == "fund" else gasless.encode_action_call(req)
         except (KeyError, ValueError, TypeError) as e:
             return 400, {"error": f"bad request: {e}"}
         if not self.by_ip.allow(ip) or not self.by_owner.allow(owner.lower()):
@@ -96,7 +105,8 @@ class Relayer:
 def serve(relayer: Relayer, host: str = "127.0.0.1", port: int = 8645) -> ThreadingHTTPServer:
     class H(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path != "/fund":
+            kind = self.path.strip("/")
+            if kind not in ("fund", *gasless.ACTION_TYPES):
                 return self._out(404, {"error": "not found"})
             n = int(self.headers.get("Content-Length") or 0)
             if n > 8192:
@@ -105,7 +115,7 @@ def serve(relayer: Relayer, host: str = "127.0.0.1", port: int = 8645) -> Thread
                 req = json.loads(self.rfile.read(n))
             except json.JSONDecodeError:
                 return self._out(400, {"error": "bad json"})
-            self._out(*relayer.handle(req, self.client_address[0]))
+            self._out(*relayer.handle(req, self.client_address[0], kind))
 
         def _out(self, code, obj):
             b = json.dumps(obj).encode()
@@ -130,6 +140,8 @@ def main(argv=None) -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8645)
     ap.add_argument("--min-fee", type=int, default=50_000, help="USDC base units (default 0.05)")
+    ap.add_argument("--min-action-fee", type=int, default=20_000,
+                    help="USDC base units for pay/renew/cash-out (default 0.02)")
     ap.add_argument("--max-gas-per-tx-wei", type=int, default=2 * 10**14, help="refuse a relay costing more")
     ap.add_argument("--gas-budget-wei", type=int, default=5 * 10**15, help="per rolling 24h")
     a = ap.parse_args(argv)
@@ -139,7 +151,7 @@ def main(argv=None) -> int:
     ch = chain.ChainCfg(rpc=a.rpc, contract=a.contract, private_key=key)
     if ch.chainid() in chain.MAINNET_CHAINS and os.environ.get("SRNET_RELAYER_MAINNET") != "1":
         raise SystemExit("refusing mainnet without SRNET_RELAYER_MAINNET=1")
-    serve(Relayer(ch, min_fee=a.min_fee, max_gas_per_tx=a.max_gas_per_tx_wei, gas_budget_wei=a.gas_budget_wei), a.host, a.port)
+    serve(Relayer(ch, min_fee=a.min_fee, min_action_fee=a.min_action_fee, max_gas_per_tx=a.max_gas_per_tx_wei, gas_budget_wei=a.gas_budget_wei), a.host, a.port)
     print(f"relayer {ch.address()} on {a.host}:{a.port} for {a.contract}")
     threading.Event().wait()
     return 0

@@ -151,3 +151,91 @@ def submit(relayer_url: str, req: dict, timeout: float = 60) -> dict:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         raise chain.ChainError(f"relayer refused: {e.read().decode(errors='replace')[:300]}") from e
+
+
+# ---- gasless SRNet-balance actions: pay (startLeaseFor), renew (renewFor), cash out (withdrawFor) ----
+# The user signs an EIP-712 intent; the relayer submits it and pays the gas. The relay fee (USDC) comes
+# out of the user's SRNet balance on top of the action, capped on-chain by maxRelayFee.
+ACTION_RELAY_FEE = 20_000  # 0.02 USDC default per payment / renewal / cash-out
+
+ACTION_TYPES = {
+    "lease": {"StartLease": [
+        {"name": "buyer", "type": "address"}, {"name": "vendorId", "type": "bytes32"},
+        {"name": "ratePerHour", "type": "uint256"}, {"name": "hoursBought", "type": "uint256"},
+        {"name": "relayFee", "type": "uint256"}, {"name": "relayer", "type": "address"},
+        {"name": "nonce", "type": "uint256"}, {"name": "deadline", "type": "uint256"}]},
+    "renew": {"Renew": [
+        {"name": "buyer", "type": "address"}, {"name": "prevLeaseId", "type": "uint256"},
+        {"name": "hoursBought", "type": "uint256"}, {"name": "relayFee", "type": "uint256"},
+        {"name": "relayer", "type": "address"}, {"name": "nonce", "type": "uint256"},
+        {"name": "deadline", "type": "uint256"}]},
+    "withdraw": {"Withdraw": [
+        {"name": "user", "type": "address"}, {"name": "amount", "type": "uint256"},
+        {"name": "to", "type": "address"}, {"name": "relayFee", "type": "uint256"},
+        {"name": "relayer", "type": "address"}, {"name": "nonce", "type": "uint256"},
+        {"name": "deadline", "type": "uint256"}]},
+}
+ACTION_SIGS = {
+    "lease": "startLeaseFor((address,bytes32,uint256,uint256,uint256,address,uint256,uint256),bytes)",
+    "renew": "renewFor((address,uint256,uint256,uint256,address,uint256,uint256),bytes)",
+    "withdraw": "withdrawFor((address,uint256,address,uint256,address,uint256,uint256),bytes)",
+}
+ACTION_TUPLES = {
+    "lease": "(address,bytes32,uint256,uint256,uint256,address,uint256,uint256)",
+    "renew": "(address,uint256,uint256,uint256,address,uint256,uint256)",
+    "withdraw": "(address,uint256,address,uint256,address,uint256,uint256)",
+}
+
+
+def sign_action(acct, kind: str, fields: dict, *, chainid: int, contract: str,
+                relay_fee: int = ACTION_RELAY_FEE, relayer: str = ZERO,
+                nonce: int | None = None, deadline: int | None = None) -> dict:
+    """Sign a StartLease / Renew / Withdraw intent. Returns the JSON request a relayer accepts."""
+    from eth_utils import to_checksum_address as cs
+    if kind not in ACTION_TYPES:
+        raise ValueError(f"unknown action {kind!r}")
+    signer_field = "user" if kind == "withdraw" else "buyer"
+    msg = {signer_field: acct.address, **fields, "relayFee": int(relay_fee), "relayer": cs(relayer),
+           "nonce": int(nonce if nonce is not None else secrets.randbits(128)),
+           "deadline": int(deadline or time.time() + INTENT_TTL)}
+    if kind == "lease" and isinstance(msg["vendorId"], str):
+        msg["vendorId"] = bytes.fromhex(msg["vendorId"].removeprefix("0x"))
+    types = ACTION_TYPES[kind]
+    order = [f["name"] for f in next(iter(types.values()))]
+    s = acct.sign_typed_data(
+        {"name": "SRNetBalance", "version": "1", "chainId": chainid, "verifyingContract": cs(contract)},
+        types, msg)
+    out = {k: ("0x" + msg[k].hex() if isinstance(msg[k], (bytes, bytearray)) else msg[k]) for k in order}
+    return {"kind": kind, "chainid": chainid, "contract": cs(contract), "intent": out,
+            "sig": "0x" + bytes(s.signature).hex()}
+
+
+def encode_action_call(req: dict) -> str:
+    from eth_abi import encode
+    kind, i = req["kind"], req["intent"]
+    order = [f["name"] for f in next(iter(ACTION_TYPES[kind].values()))]
+    vals = []
+    for k in order:
+        v = i[k]
+        if k == "vendorId":
+            v = bytes.fromhex(str(v).removeprefix("0x"))
+        elif k in ("buyer", "user", "to", "relayer"):
+            v = str(v)
+        else:
+            v = int(v)
+        vals.append(v)
+    args = encode([ACTION_TUPLES[kind], "bytes"], [tuple(vals), bytes.fromhex(req["sig"][2:])])
+    return "0x" + (chain.selector(ACTION_SIGS[kind]) + args).hex()
+
+
+def submit_action(relayer_url: str, req: dict, timeout: float = 60) -> dict:
+    body = json.dumps(req).encode()
+    r = urllib.request.Request(relayer_url.rstrip("/") + "/" + req["kind"], data=body,
+                               headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise chain.ChainError(f"relayer refused: {e.read().decode(errors='replace')[:300]}") from e
+    except urllib.error.URLError as e:
+        raise chain.ChainError(f"relayer unreachable at {relayer_url}: {e.reason}") from e

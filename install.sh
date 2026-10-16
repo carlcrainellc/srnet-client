@@ -57,9 +57,10 @@ fi
 echo
 echo "Done. Next steps:"
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "  add $BIN to your PATH";; esac
+case ":$PATH:" in *":$BIN:"*) ;; *) echo "  (or open a new terminal; Ubuntu adds ~/.local/bin to PATH at login once it exists)";; esac
 echo "  srnet key new      create your wallet (saved encrypted)"
-echo "  srnet doctor       check everything is ready"
+echo "  srnet doctor       check your setup (Session Router, DNS, wallet); writes a report"
 echo "  srnet ui           open the app in your browser"
-echo "  srnet doctor       check my setup (writes a report you can send)"
+echo "Session Router is a separate program: install and start it yourself before using .sesh names."
 [ "$(uname -s)" = "Darwin" ] && echo "  note: 'srnet connect' (routing traffic through an exit) is Linux-only for now."
 exit 0

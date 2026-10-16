@@ -205,7 +205,7 @@ const W = (() => {
   }
   function fill(r) {
     $("w-addr").textContent = r.address || "no keystore (run srnet key new)";
-    $("w-usdc").textContent = fmt(r.usdc_wallet, 2); $("w-dep").textContent = fmt(r.deposited, 2); $("w-eth").textContent = fmt(r.eth, 6);
+    $("w-usdc").textContent = fmt(r.usdc_wallet, 2); $("w-dep").textContent = fmt(r.deposited, 2);
     $("x-seller").textContent = r.seller || "-";
     $("x-conn").textContent = r.connected ? "yes (" + String(r.connected).slice(0, 12) + "…)" : "no";
     $("x-ar").checked = !!r.auto_renew;
@@ -226,9 +226,9 @@ const W = (() => {
     for (const l of r.listings) {
       const tr = el("tr"); [l.seller, l.region || "-", l.price, ago(l.age_s)].forEach((t) => tr.appendChild(el("td", t)));
       const td = el("td"), b = el("button", "Buy 1 hour"), c = el("button", "Connect");
-      b.addEventListener("click", () => withPass("Buy 1 hour of exit?", "Payment is final. No refund.",
-        ["seller: " + l.seller, "price: " + l.price + " USDC/hr", $("x-fund").checked ? "deposit if needed (up to 3% fee)" : "from your SRNet balance"],
-        "Buy (final)", (pw) => act("buy", {seller: l.seller, fund: $("x-fund").checked}, pw)));
+      b.addEventListener("click", () => withPass("Buy 1 hour of exit?", "Exits are Beta / Untested. Payment is final. No refund.",
+        ["seller: " + l.seller, "price: " + l.price + " USDC/hr", "paid from your SRNet balance"],
+        "Buy (final)", (pw) => act("buy", {seller: l.seller}, pw)));
       c.addEventListener("click", () => withPass("Connect to this exit?", "uses your current lease", ["seller: " + l.seller], "Connect", (pw) => act("connect", {seller: l.seller}, pw)));
       td.append(b, c); tr.appendChild(td); tb.appendChild(tr);
     }
@@ -242,7 +242,7 @@ const W = (() => {
   async function showQr() {
     const r = await call("topup/info", {amount: $("w-amt").value});
     if (!r.ok) { $("w-warn").textContent = "top up: " + r.err; return; }
-    $("w-warn").textContent = r.warning + "\nDeposit fee: " + r.fee_pct + "% of the whole deposit. Relayer fee: " + Number(r.relay_fee).toFixed(2) + " USDC.";
+    $("w-warn").textContent = r.warning + "\nDeposit fee: " + r.fee_pct + "% of the whole deposit. Relayer fee: " + Number(r.relay_fee).toFixed(2) + " USDC." + (r.relayer ? "" : "\nSet your relayer above first.");
     $("w-uri").textContent = r.uri;
     const q = r.qr ? await fetch("/api/wallet/qr.svg", {headers: {"X-Core": "1"}}) : null;
     if (q && q.ok) {

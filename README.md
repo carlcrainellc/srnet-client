@@ -6,12 +6,15 @@ One app for SRNet: typed SNApps, the exit marketplace, and your SRNet balance.
   `.sesh` pages. Hosts serve only signed data; the client ships the interface. Every record is
   signature-checked, every template runs in a sandbox with no network access, and HTML pages
   open in a viewer that strips all scripts.
-- **Exits.** Browse exit sellers from the signed exit board, buy an hour, auto-renew, and
-  connect. The board is fetched from three `.sesh` names with failover and a verified cache.
-- **Wallet / Top up.** Fund your SRNet balance from any phone wallet with a plain USDC send.
-  No ETH needed.
+- **Exits (Beta / Untested).** Browse exit sellers from the signed exit board, buy an hour,
+  auto-renew, and connect. The board is fetched from three `.sesh` names with failover and a
+  verified cache. The exit marketplace works but is not production-certified: buy one hour at
+  a time and keep amounts small.
+- **Wallet / Top up.** Scan the QR with a phone wallet, or send USDC on Arbitrum One from any
+  exchange or wallet. A relayer moves it into your SRNet balance. No ETH needed.
 - **One way to pay.** Exits, store items and future paid SNApps all use *Pay with SRNet
-  balance*, confirmed in the app's own prompt.
+  balance*, confirmed in the app's own prompt and sent through the same relayer, so paying
+  never needs ETH either.
 - **Mail.** Sealed messages to anyone's SRNet address, stored by mail hosts until they come
   online. Hosts can't read your mail or see who sent it. Senders sign every message.
 - **Private files.** File drops are encrypted on your computer before upload. Share with chosen
@@ -49,36 +52,50 @@ srnet mail name 'srnet://room/...' "Bob's room"              # local petname for
 
 Wire format and host API: [`snapps/docs/MAIL.md`](snapps/docs/MAIL.md).
 
-## Install
+## Install (Ubuntu 24.04)
 
-Linux or macOS, Python 3.10 or newer.
+Linux is the supported platform for this release; it is tested on Ubuntu 24.04.
+
+### 1. Session Router (separate prerequisite)
+
+SRNet runs on top of Session Router, which carries all `.sesh` traffic. It is a separate program:
+install it and start it yourself first. This client never installs it and never sets it up as a
+service. Check that it is running and its API answers on `127.0.0.1:1190`:
 
 ```sh
+ss -ltnp | grep 1190          # something listening on 127.0.0.1:1190
+getent hosts localhost.sesh   # .sesh names resolve
+```
+
+`srnet doctor` runs the same checks and tells you what to fix.
+
+### 2. The SRNet client
+
+```sh
+sudo apt install -y git python3-venv
 git clone <this repository> srnet-client
 cd srnet-client
 ./install.sh
-srnet key new
-srnet doctor
-srnet ui
 ```
 
-The installer puts everything under `~/.local/share/srnet-client` and adds `srnet` and
-`srnet-relayer` to `~/.local/bin`. It needs no root. `./install.sh --uninstall` removes it and
-keeps your wallet in `~/.srnet`.
+The installer needs no root. It puts everything under `~/.local/share/srnet-client` and adds
+`srnet` and `srnet-relayer` to `~/.local/bin`. If `srnet` is not found afterwards, open a new
+terminal (Ubuntu adds `~/.local/bin` to your PATH at login once it exists) or run
+`export PATH="$HOME/.local/bin:$PATH"`. `./install.sh --uninstall` removes it and keeps your
+wallet in `~/.srnet`.
 
-Routing your traffic through an exit (`srnet connect`) uses nftables and is Linux-only.
-Browsing SNApps, listing exits, buying leases and topping up work on macOS too.
+### 3. First run
 
-**Windows:** install Python 3.10+ (python.org or `winget install Python.Python.3.12`), then in
-PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
+```sh
+srnet key new     # create your wallet (encrypted; back up the file and passphrase)
+srnet doctor      # check Session Router, DNS, the demo hosts and your wallet
+srnet ui          # open the app in your browser
 ```
 
-It installs under `%LOCALAPPDATA%\srnet-client`, adds `srnet` to your PATH and an **SRNet** entry
-to the Start menu. `-Uninstall` removes it. `srnet ui` and `srnet snapps` work on Windows;
-`connect` is Linux-only.
+The app opens with the demo lobby, directory and mail already joined.
+
+macOS works for SNApps, mail, files and the wallet; routing traffic through an exit
+(`srnet connect`) uses nftables and is Linux-only. Windows is not supported in this release.
 
 ## The app
 
@@ -86,17 +103,19 @@ to the Start menu. `-Uninstall` removes it. `srnet ui` and `srnet snapps` work o
 on `127.0.0.1:48920`, with three ribbon tabs in the same window and style:
 
 - **Home**: join a collection, your sidebar of rooms, boards, file drops, mail, and **Check my setup**.
-- **Exits**: the signed seller board (region, price per hour, last refresh), buy one hour (final,
-  passphrase asked in a sheet), connect, disconnect, auto-renew and lease status.
-- **Wallet**: wallet address, USDC, SRNet balance, ETH, and the phone top-up QR with gasless deposit.
+- **Exits (Beta / Untested)**: the signed seller board (region, price per hour, last refresh), buy
+  one hour from your SRNet balance (final, passphrase asked in a sheet), connect, disconnect,
+  auto-renew and lease status.
+- **Wallet**: your SRNet balance, the top-up QR and address, the relayer setting (set once), and
+  any USDC waiting in your wallet to be deposited.
 
 The wallet backend runs inside the same process on a token-protected loopback port; the shell
 reaches it only through the core's API. The old standalone wallet page is retired
 (`srnet ui --legacy-page` keeps it for now).
 
-`srnet doctor` (and Check my setup) runs a read-only preflight: Windows version/arch, service and
-admin, Wintun, ports, router service + API, `.sesh` DNS, a demo reachability probe, clock, disk and
-firewall/AV/VPN. Each line is PASS/WARN/FAIL with a FIX hint; a report file is written for support.
+`srnet doctor` (and Check my setup) runs a read-only preflight: ports, the Session Router API on
+`127.0.0.1:1190`, `.sesh` DNS, a demo reachability probe, clock, disk and VPN/firewall, then your
+wallet, SRNet balance and relayer. Each line is PASS/WARN/FAIL with a FIX hint; a report file is written for support.
 
 The page only answers to the link it prints, and your keystore passphrase is used for the
 action you click and never saved.
@@ -104,11 +123,12 @@ action you click and never saved.
 ## Command line
 
 ```
-srnet exits                      list sellers from the signed exit board
-srnet buy <seller>               prepay one hour (--hours N for more)
+srnet exits                      exit marketplace (Beta / Untested): list sellers
+srnet buy <seller>               prepay one hour from your SRNet balance (--hours N for more)
 srnet renew --loop               buy the next hour near the end of the current one
 srnet connect <seller>           route traffic through the exit (Linux)
-srnet topup --amount N           phone-wallet top-up
+srnet topup --amount N           top up: QR or send USDC from any wallet, gas-free deposit
+srnet cashout --amount N         withdraw unused SRNet balance (gas-free)
 srnet pay --vendor-id V --amount N   pay any SRNet seller from your balance
 srnet vendor --shop-key K        seller: set up SRNet-balance payments
 srnet deliver                    resend your exit claim to the seller
@@ -157,21 +177,37 @@ Your SRNet balance lives in the SRNetBalance contract on Arbitrum One at
 `0x7E0d01B7dd916BdAB96B0971ab92D160E1664431`. The source is verified on Sourcify.
 The contract is unaudited; keep amounts small.
 
-- Deposit fee: 3% of each deposit.
-- Phone-wallet top-ups go through a relayer, which takes a flat fee (default 0.05 USDC; the
-  contract caps it at 1 USDC). The relayer can't move your funds anywhere else or charge more
-  than you signed.
+How funding and paying work:
+
+1. **Top up.** Scan the QR in Wallet (or `srnet topup`) with a phone wallet, or send USDC on
+   Arbitrum One to your SRNet wallet address from any exchange or wallet. Send only USDC on
+   Arbitrum One.
+2. **Deposit.** When it arrives, the client signs a gas-free approval and the relayer moves it
+   into your SRNet balance.
+3. **Pay.** Exits, store items and cash-outs are signed by your wallet and submitted by the same
+   relayer. You never need ETH.
+
+Fees:
+
+- Deposit fee: 3% of each deposit, not refunded on cash-out.
+- Relayer fee: a flat fee per relayed action, taken from your SRNet balance: 0.05 USDC per
+  deposit and 0.02 USDC per payment, hourly renewal or cash-out by default. The contract caps it
+  at 1 USDC. Your signature binds the amount, the recipient and the fee, so the relayer can't
+  move your funds anywhere else or charge more than you signed.
 - Leases are prepaid whole hours, at most $20 per lease. Payment is final once a lease starts.
   Buying one hour at a time keeps the most you can lose to about one hour.
 - Store items are paid the same way: one payment from your SRNet balance to the seller, at most
-  $20, no extra fee, final. Sellers run `srnet vendor --shop-key <key>` once and put the vendor id
+  $20, final, with no fee beyond the relayer fee. Sellers run `srnet vendor --shop-key <key>` once and put the vendor id
   in their listings. Store payments from the SNApps window stay off on mainnet until you set
   `"payments": {"allow_mainnet": true}` in `client.json`.
 - After you buy exit time, the client sends your signed claim straight to the seller over
   Session Router and waits for the seller's acknowledgment. `srnet deliver` resends it.
 
-No public relayer is configured by default. Set one in the Wallet tab, with
-`srnet topup --relayer URL`, or run your own with `srnet-relayer`.
+**Set your relayer once.** Enter its URL in the Wallet tab (or put `"relayer": "<url>"` in
+`~/.srnet/config.json`, or set `SRNET_RELAYER`). Top-ups, payments, renewals and cash-outs all
+use it. Anyone can run one with `srnet-relayer` (see [client-cli/README.md](client-cli/README.md)).
+Without a relayer, payments fall back to sending transactions from your own wallet, which
+needs a little ETH on Arbitrum One for gas.
 
 The previous contract `0x07bbe156083EbBcc9435C721393Edd36a383E648` stays live, so balances
 there can still be cashed out.
@@ -186,7 +222,8 @@ python3 scripts/smoke.py                                    # local end-to-end, 
 ```
 
 The smoke test runs the SNApps demo, lists exits from a locally signed board with a dead first
-copy, and does a full phone-wallet top-up on a local anvil chain. It uses throwaway keys only.
+copy, and does a full QR top-up on a local anvil chain. The client tests also run a gas-free
+deposit, payment, renewal and cash-out from a wallet holding no ETH (anvil, when Foundry is installed). It uses throwaway keys only.
 
 ## Known gaps
 

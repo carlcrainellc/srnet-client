@@ -197,7 +197,7 @@ def c_block():
         if not line.lower().startswith("sr-tun") and any(w.lower() in line.lower() for w in VPN_WORDS):
             hits.append("VPN adapter up: " + line.strip())
     if hits:
-        return "WARN", " | ".join(hits), "allow SRNet in your firewall/antivirus, or disconnect the VPN, then restart SRNet"
+        return "WARN", " | ".join(hits), "turn off the VPN (quit it fully, e.g. in Task Manager) and/or add a firewall exception for SRNet, then restart SRNet"
     return "PASS", "no blocking rule, detection or VPN seen", ""
 
 

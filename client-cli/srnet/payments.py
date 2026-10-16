@@ -3,9 +3,11 @@
 Every payment is a prepaid one-hour lease to the seller's vendor id on the live SRNetBalance
 contract (no contract change):
 
-    startLease(vendorId, ratePerHour = price, hoursBought = 1)
+    startLeaseFor / startLease(vendorId, ratePerHour = price, hoursBought = 1)
 
-- The 3% fee was already taken at deposit; nothing more is charged here.
+- The 3% fee was already taken at deposit. With a relayer set (the normal path) the payment is
+  gasless: the wallet signs a StartLease intent and the relayer submits startLeaseFor, taking a
+  small relay fee from the SRNet balance. Without one, startLease is sent directly (needs ETH).
 - The contract caps each payment at maxPerLease ($20).
 - Payment is final: the first hour begins at once, so the seller can claim the whole amount
   right away (claimEarned); the buyer can't cancel.
@@ -72,7 +74,7 @@ def describe(p: Payment) -> list[str]:
         lines.append(f"seller: {p.seller}")
     if p.hours > 1:
         lines.append(f"hours: {p.hours} at {p.amount / chain.USDC:.2f}/hour")
-    lines += ["no extra fee (the 3% deposit fee was already taken when you topped up)",
+    lines += ["no extra fee beyond the small relayer fee (the 3% deposit fee was taken at top-up)",
               "payment is final; there is no refund"]
     return lines
 

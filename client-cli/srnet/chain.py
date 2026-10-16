@@ -185,6 +185,8 @@ class ChainCfg:
     contract: str
     private_key: str  # buyer key (starts and renews its own leases; cannot cancel)
     receipt_timeout: float = 180
+    relayer: str = ""  # relayer URL: when set, payments, renewals and cash-outs are gasless (no ETH)
+    relay_fee: int = 20_000  # max USDC relay fee per gasless action (0.02)
     _rpc: JsonRpc = field(default=None, init=False, repr=False)  # type: ignore
     _acct: object = field(default=None, init=False, repr=False)
     _cid: int | None = field(default=None, init=False, repr=False)
@@ -273,7 +275,9 @@ class ChainCfg:
             raise ChainError(f"gas cost {tx['gas'] * tx['maxFeePerGas']} wei is over the allowed {max_gas} wei")
         need = tx["gas"] * tx["maxFeePerGas"]
         if self.eth_balance() < need:
-            raise ChainError(f"wallet {frm} needs ETH for gas (about {need / 1e18:.6f} ETH)")
+            raise ChainError(f"wallet {frm} has no ETH for gas (about {need / 1e18:.6f} ETH needed); "
+                             "set a relayer once (Wallet tab, or \"relayer\" in config.json) so SRNet "
+                             "payments need no ETH")
         h = self._rpc.call("eth_sendRawTransaction", sign_tx(self._acct, tx))
         return self._wait(h)
 
@@ -311,13 +315,22 @@ class ChainCfg:
         need = int(rate_per_hour) * int(hours)
         have = self.available()
         if have < need:
-            raise ChainError(f"deposited balance is {have / USDC:.2f} USDC, lease needs {need / USDC:.2f}; "
-                             "rerun with --fund")
+            raise ChainError(f"SRNet balance is {have / USDC:.2f} USDC, lease needs {need / USDC:.2f}; "
+                             "top up first")
+        if self.relayer:
+            if have < need + int(self.relay_fee):
+                raise ChainError(f"SRNet balance is {have / USDC:.2f} USDC, payment plus relay fee needs "
+                                 f"{(need + int(self.relay_fee)) / USDC:.2f}; top up first")
+            return self._lease_id_from(self._relay("lease", {"vendorId": vendor_id, "ratePerHour": int(rate_per_hour),
+                                                             "hoursBought": int(hours)}))
         rc = self._send("startLease(bytes32,uint256,uint256)", vendor_id, int(rate_per_hour), int(hours))
         return self._lease_id_from(rc)
 
     def renew(self, prev_lease_id: int, hours: int = 1) -> int:
         """Buy `hours` more from the same seller at the same rate, starting when prev ends."""
+        if self.relayer:
+            return self._lease_id_from(self._relay("renew", {"prevLeaseId": int(prev_lease_id),
+                                                             "hoursBought": int(hours)}))
         rc = self._send("renewLease(uint256,uint256)", int(prev_lease_id), int(hours))
         return self._lease_id_from(rc)
 
@@ -369,8 +382,24 @@ class ChainCfg:
         stops renewing; the loss is the prepaid hour(s) of this lease."""
         return
 
-    def cash_out(self, amount: int) -> None:
+    def cash_out(self, amount: int, to: str | None = None) -> None:
+        """Withdraw unused SRNet balance to `to` (default: this wallet). Gasless when a relayer is set."""
+        if self.relayer:
+            from eth_utils import to_checksum_address
+            self._relay("withdraw", {"amount": int(amount), "to": to_checksum_address(to or self.address())})
+            return
         self._send("cashOut(uint256)", int(amount))
+
+    def _relay(self, kind: str, fields: dict) -> dict:
+        """Sign an EIP-712 intent, hand it to the relayer (it pays gas), return the mined receipt."""
+        from . import gasless
+        req = gasless.sign_action(self._acct, kind, fields, chainid=self.chainid(), contract=self.contract,
+                                  relay_fee=int(self.relay_fee),
+                                  deadline=max(int(time.time()), self.now()) + gasless.INTENT_TTL)
+        out = gasless.submit_action(self.relayer, req)
+        if not out.get("tx"):
+            raise ChainError(f"relayer returned no transaction: {str(out)[:200]}")
+        return self._wait(out["tx"])
 
     def sign_claim(self, message: str) -> str:
         """EIP-191 personal_sign, same bytes as `cast wallet sign`."""
@@ -494,3 +523,9 @@ def read_only(rpc: str, contract: str) -> "ChainCfg":
     """A ChainCfg for eth_call reads only. Holds a random throwaway key that never signs anything."""
     import secrets
     return ChainCfg(rpc=rpc, contract=contract, private_key="0x" + secrets.token_hex(32))
+
+
+def relayer_url(cfg: dict | None = None) -> str:
+    """The relayer used for gasless top-ups, payments, renewals and cash-outs: config, then $SRNET_RELAYER."""
+    import os
+    return ((cfg or {}).get("relayer") or os.environ.get("SRNET_RELAYER") or "").strip()

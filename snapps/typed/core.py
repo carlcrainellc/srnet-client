@@ -621,7 +621,7 @@ class Core:
         pk = private_key or K.unlock(Path(cfg.get("keystore") or Path.home() / ".srnet" / "keystore.json"),
                                      passphrase or "")
         ch = CH.ChainCfg(rpc=cfg.get("rpc") or CH.DEFAULT_RPC, contract=cfg.get("contract") or CH.DEFAULT_CONTRACT,
-                         private_key=pk)
+                         private_key=pk, relayer=cfg.get("relayer") or _home_relayer())
         if ch.chainid() in CH.MAINNET_CHAINS and not cfg.get("allow_mainnet"):
             raise F.FormatError("mainnet payments are off; set payments.allow_mainnet in the client config")
         return P, ch
@@ -1181,3 +1181,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def _home_relayer() -> str:
+    """The relayer the user set once in the Wallet tab (<srnet home>/config.json), else $SRNET_RELAYER."""
+    import json as _json
+    import os as _os
+    home = Path(_os.environ.get("SRNET_HOME") or Path.home() / ".srnet")
+    try:
+        cfg = _json.loads((home / "config.json").read_text())
+    except (OSError, ValueError):
+        cfg = {}
+    from srnet import chain as CH
+    return CH.relayer_url(cfg if isinstance(cfg, dict) else {})

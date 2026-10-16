@@ -34,7 +34,7 @@ class WalletTabs(unittest.TestCase):
         self.calls = []
         self.be.board = lambda: {"seq": 7, "source": "test", "dropped": 0, "listings": [
             {"seller": SELLER, "region": "us-east", "price": "0.10", "age_s": 300}]}
-        self.be.status = lambda pw=None: {"address": ADDR, "usdc_wallet": 12.5, "deposited": 3, "eth": 0.001,
+        self.be.status = lambda pw=None: {"address": ADDR, "usdc_wallet": 12.5, "deposited": 3, 
                                           "seller": None, "connected": None, "auto_renew": False}
 
         def buy(*a):

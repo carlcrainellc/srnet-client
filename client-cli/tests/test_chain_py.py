@@ -163,7 +163,7 @@ class ErrorPaths(unittest.TestCase):
         c, _, _ = ccfg({"eth_chainId": "0x7a69", "eth_call": "0x" + word(100)})
         with self.assertRaises(chain.ChainError) as e:
             c.start_lease("0x" + "bb" * 32, 1_000_000, 1)
-        self.assertIn("--fund", str(e.exception))
+        self.assertIn("top up", str(e.exception))
 
     def test_revert_decoded_from_rpc(self):
         rev = {"error": {"code": 3, "message": "execution reverted",

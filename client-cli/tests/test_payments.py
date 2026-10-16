@@ -77,6 +77,51 @@ class Anvil(unittest.TestCase):
         finally:
             anvil_env.stop(env)
 
+    def test_gasless_buy_renew_cashout_with_zero_eth(self):
+        """QR/external-wallet path: buyer holds USDC but no ETH; relayer pays all gas."""
+        import secrets as _s
+        from srnet import gasless, relayer as R
+        env = anvil_env.start()
+        try:
+            k = env["keys"]
+            seller = chain.ChainCfg(rpc=env["rpc"], contract=env["contract"], private_key=k[1])
+            salt = P.shop_salt("ee" * 32)
+            vid = P.vendor_id_for(seller.address(), salt)
+            seller._send("configureVendor(bytes32,bytes32)", vid, salt)
+            rel_ch = chain.ChainCfg(rpc=env["rpc"], contract=env["contract"], private_key=k[3])
+            srv = R.serve(R.Relayer(rel_ch, min_fee=50_000, min_action_fee=20_000, max_gas_per_tx=10**17, gas_budget_wei=10**18), "127.0.0.1", 0)
+            url = f"http://127.0.0.1:{srv.server_address[1]}"
+            try:
+                fresh = "0x" + _s.token_hex(32)  # brand-new key: zero ETH
+                buyer = chain.ChainCfg(rpc=env["rpc"], contract=env["contract"], private_key=fresh, relayer=url)
+                self.assertEqual(buyer.eth_balance(), 0)
+                seller._send("mint(address,uint256)", buyer.address(), 10_000_000, to=buyer.usdc())  # "QR send"
+                n, name, ver = buyer.permit_info()
+                req = gasless.sign_topup(buyer._acct, chainid=buyer.chainid(), contract=buyer.contract,
+                                         usdc=buyer.usdc(), amount=10_000_000, permit_nonce=n,
+                                         usdc_name=name, usdc_version=ver)
+                self.assertTrue(gasless.submit(url, req)["ok"])
+                avail = buyer.available()
+                self.assertEqual(avail, 10_000_000 - 300_000 - 50_000)
+                a = P.pay(buyer, P.Payment("exit", vid, 1_000_000))
+                self.assertEqual(buyer.available(), avail - 1_000_000 - 20_000)
+                self.assertTrue(P.verify(seller, a["lease_id"], vid, 1_000_000, buyer.address()))
+                buyer._rpc.call("evm_increaseTime", 3300)
+                buyer._rpc.call("evm_mine")
+                r = buyer.renew(a["lease_id"], 1)  # hourly auto-renew, also gasless
+                self.assertEqual(buyer.renewed_by(a["lease_id"]), r)
+                b = P.pay(buyer, P.Payment("shop", vid, 2_000_000))
+                self.assertGreater(b["lease_id"], r)
+                left = buyer.available()
+                buyer.cash_out(1_000_000)
+                self.assertEqual(buyer.available(), left - 1_000_000 - 20_000)
+                self.assertEqual(buyer.usdc_balance(), 1_000_000)
+                self.assertEqual(buyer.eth_balance(), 0)  # never needed gas
+            finally:
+                srv.shutdown()
+        finally:
+            anvil_env.stop(env)
+
 
 if __name__ == "__main__":
     unittest.main()

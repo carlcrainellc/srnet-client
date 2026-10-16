@@ -57,7 +57,6 @@ async function loadStatus() {
   $("addr").textContent = r.address || "no keystore (run srnet key new)";
   $("usdc").textContent = f(r.usdc_wallet, 2);
   $("dep").textContent = f(r.deposited, 2);
-  $("eth").textContent = f(r.eth, 6);
   $("seller").textContent = r.seller || "-";
   $("conn").textContent = r.connected ? "yes (" + r.connected.slice(0, 12) + "...)" : "no";
   $("ar").checked = !!r.auto_renew;
@@ -80,8 +79,8 @@ async function act(path, extra) {
 }
 
 function buy(seller) {
-  if (!confirm("Buy 1 hour from " + seller.slice(0, 16) + "...? Payment is final.")) return;
-  act("/api/buy", {seller: seller, fund: $("fund").checked});
+  if (!confirm("Buy 1 hour from " + seller.slice(0, 16) + "...? Paid from your SRNet balance. Exits are Beta / Untested. Payment is final.")) return;
+  act("/api/buy", {seller: seller});
 }
 
 function showTab(name) {

@@ -71,11 +71,10 @@ class Backend:
         if passphrase:
             pk = keys.unlock(self._keystore(), passphrase)
             ch = chain.ChainCfg(rpc=self._rpc(), contract=self.cfg().get("contract") or chain.DEFAULT_CONTRACT,
-                                private_key=pk)
+                                private_key=pk, relayer=self.relayer_url())
             ch.chainid()
             out["usdc_wallet"] = ch.usdc_balance() / 1e6
             out["deposited"] = ch.available() / 1e6
-            out["eth"] = ch.eth_balance() / 1e18
             if lease.get("current"):
                 ch.contract = lease["contract"]
                 cur = chain.newest_lease(ch, int(lease["current"]))
@@ -190,7 +189,7 @@ class Backend:
             if getattr(self, "topup_proc", None) and self.topup_proc.poll() is None:
                 return {"ok": False, "err": "a top-up is already waiting"}
             if not self.relayer_url():
-                return {"ok": False, "err": "set a relayer URL first (no public relayer is configured by default)"}
+                return {"ok": False, "err": "set your relayer once (Wallet tab, Relayer field), then top up"}
             env = dict(os.environ)
             env[keys.PASSWORD_ENV] = passphrase
             cmd = [sys.executable, "-m", "srnet", "--home", str(self.st.root), "topup",

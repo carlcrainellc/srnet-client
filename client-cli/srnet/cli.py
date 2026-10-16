@@ -2,20 +2,24 @@
 """srnet: SNApps, exits and wallet for SRNet.
 
   srnet doctor             check Python packages, RPC, chain, wallet and balances
-  srnet exits              fetch the signed board and list sellers (--listings FILE: offline)
-  srnet buy <seller>       prepay 1 hour (default; --hours N) at the listed price/hour
+  srnet exits              exit marketplace (Beta / Untested): list sellers from the signed board
+  srnet buy <seller>       prepay 1 hour (default; --hours N) from your SRNet balance
   srnet connect <seller>   MapExit full_tunnel; if the exit is not EXIT_CAPABLE: unmap and stop renewing
   srnet renew [--loop]     auto-renew hour by hour (default on): buys the next hour in the last 10 minutes
   srnet stop               stop auto-renew (the current paid hour still runs out; no refund)
   srnet status
   srnet disconnect         unmap, and stop auto-renew
-  srnet topup --amount N   phone-wallet top-up: QR, plain USDC send, gasless deposit
+  srnet topup --amount N   top up: QR / send USDC from any wallet, gasless deposit via your relayer
   srnet deliver            resend your last claim to the seller (buy does this automatically)
   srnet pay --vendor-id V --amount N  pay any SRNet seller from your SRNet balance
+  srnet cashout --amount N withdraw unused SRNet balance to your wallet
   srnet vendor --shop-key K  seller: bind a vendor id for SRNet-balance payments
   srnet snapps [--config F] typed SNApps client (boards, rooms, wiki, shop, drop, pages)
   srnet ui                 the app: SNApps, Exits, Wallet / Top up (also plain `srnet`)
 
+GASLESS: fund with USDC on Arbitrum One (QR or any wallet). Set a relayer once ("relayer" in
+config.json or $SRNET_RELAYER); top-ups, payments, renewals and cash-outs then need no ETH.
+EXITS ARE BETA / UNTESTED: they work but are not production-certified; keep amounts small.
 PAYMENT IS FINAL: once a lease starts the seller may take that hour; there is no buyer
 cancel and no refund. Buying one hour at a time keeps the most you can lose at about one hour's price.
 Defaults: nftables kill switch (clearnet TCP and DNS), first-run visibility warning, hourly
@@ -24,7 +28,7 @@ auto-renew. Plain DNS is blocked. Turn on DNS-over-HTTPS in your browser, or nam
   srnet key new|import     create the encrypted wallet keystore ($SRNET_HOME/keystore.json)
 
 Settings come from flags, then $SRNET_HOME/config.json (keys: rpc, keystore, listings_path,
-board_urls, board_pin, sesh_dns, spool, omq), then env (SRNET_RPC), then the Arbitrum One default (https://arb1.arbitrum.io/rpc). The wallet key comes from the keystore; the passphrase is
+board_urls, board_pin, sesh_dns, spool, omq, relayer), then env (SRNET_RPC), then the Arbitrum One default (https://arb1.arbitrum.io/rpc). The wallet key comes from the keystore; the passphrase is
 prompted or read from SRNET_KEYSTORE_PASSWORD. Plaintext --private-key / SRNET_PRIVATE_KEY
 still work but print a warning. Arbitrum One uses real USDC: the contract is unaudited, keep
 amounts small.
@@ -94,6 +98,7 @@ def cmd_exits(args, st: state.State) -> int:
     if not board:
         print("(no valid listings)")
         return 0
+    print("Exit marketplace: Beta / Untested. Not production-certified; buy one hour at a time.", file=sys.stderr)
     print(boardmod.table(board, time.time()))
     return 0
 
@@ -134,7 +139,7 @@ def cmd_buy(args, st: state.State) -> int:
         if not rpc_url or not pk:
             print(_MISSING_CFG, file=sys.stderr)
             return 2
-        ch = chain.ChainCfg(rpc=rpc_url, contract=L["contract"], private_key=pk)
+        ch = chain.ChainCfg(rpc=rpc_url, contract=L["contract"], private_key=pk, relayer=chain.relayer_url(cfg))
         if ch.chainid() != cid:
             print(f"wrong chain: your RPC is on {_chain_name(ch.chainid())} but this seller's listing is on "
                   f"{_chain_name(cid)}; use an RPC for {_chain_name(cid)}", file=sys.stderr)
@@ -142,9 +147,10 @@ def cmd_buy(args, st: state.State) -> int:
         rate, hours = _rate_hours(args, L)
         amount = rate * hours
         if args.fund:
-            # Plain UX: fund fee (≤3%) leaves immediately and is never returned on cashOut.
+            # Advanced: direct deposit from this key (needs ETH for gas). Normal path: srnet topup.
             print(
-                "NOTE: fund() takes up to 3% as a non-refundable fee now; "
+                "NOTE: --fund deposits directly from this key and needs ETH for gas (use srnet topup for "
+                "the gas-free path). The deposit takes up to 3% as a non-refundable fee; "
                 "cash-out later returns only unused available balance, not that fee.",
                 file=sys.stderr,
             )
@@ -238,9 +244,9 @@ def cmd_key(args, st: state.State) -> int:
 
 
 NEW_KEY_NOTE = (
-    "Next: top up your SRNet balance from any wallet with `srnet topup` or Wallet / Top up in\n"
-    "`srnet ui` (USDC on Arbitrum One; gasless, no ETH needed). A little ETH in this address is\n"
-    "only needed for now to pay directly from this key (store items, exit hours).\n"
+    "Next: open `srnet ui`, go to Wallet / Top up, set your relayer once, then scan the QR or send\n"
+    "USDC on Arbitrum One from any wallet to this address. Deposits and payments go through the\n"
+    "relayer, so you never need ETH.\n"
     "Back up the keystore file and your passphrase: there is no recovery.")
 
 
@@ -301,7 +307,7 @@ def cmd_doctor(args, st: state.State) -> int:
     contract = args.contract or (board[0]["listing"]["contract"] if board else None)
     want = int(board[0]["listing"]["chainid"]) if board else None
     try:
-        ch = chain.ChainCfg(rpc=rpc_url, contract=contract or chain.DEFAULT_CONTRACT, private_key=pk)
+        ch = chain.ChainCfg(rpc=rpc_url, contract=contract or chain.DEFAULT_CONTRACT, private_key=pk, relayer=chain.relayer_url(cfg))
         line(True, "wallet", ch.address())
         try:
             cid = ch.chainid()
@@ -310,16 +316,16 @@ def cmd_doctor(args, st: state.State) -> int:
             return 1
         line(want in (None, cid), "chain", _chain_name(cid) + ("" if want in (None, cid) else
              f"; listings are on {_chain_name(want)}"))
-        eth = ch.eth_balance()
-        line(eth > 0 or None, "gas", f"{eth / 1e18:.6f} ETH" + ("" if eth else " (the wallet needs ETH for gas)"))
+        rel = chain.relayer_url(cfg)
+        line(True if rel else None, "relayer",
+             rel or "not set; set it once (Wallet tab or \"relayer\" in config.json) for gas-free payments")
         if not contract:
             line(None, "contract", "unknown until a listing is loaded (or pass --contract)")
         else:
             line(True, "contract", f"{contract}, USDC {ch.usdc()}")
             usdc, allow, avail = ch.usdc_balance(), ch.allowance(), ch.available()
             line(usdc > 0 or avail > 0 or None, "USDC in wallet", f"{usdc / 1e6:.2f}")
-            line(True, "deposited (available)", f"{avail / 1e6:.2f}")
-            line(True, "allowance", f"{allow / 1e6:.2f} (buy --fund approves as needed)")
+            line(True, "SRNet balance", f"{avail / 1e6:.2f}" + ("" if avail else " (top up: srnet topup or the Wallet tab)"))
     except chain.ChainError as e:
         line(False, "chain", str(e))
     print("all good" if not bad else f"{bad} problem(s) above")
@@ -385,7 +391,7 @@ def _chain_for(args, st: state.State, L: dict):
     pk, _ = keys.resolve(args, cfg, st.root)
     if not rpc_url or not pk:
         raise SystemExit(_MISSING_CFG)
-    ch = chain.ChainCfg(rpc=rpc_url, contract=L["contract"], private_key=pk)
+    ch = chain.ChainCfg(rpc=rpc_url, contract=L["contract"], private_key=pk, relayer=chain.relayer_url(cfg))
     ch.chainid()  # refuses unsupported chains
     return ch
 
@@ -458,7 +464,7 @@ def cmd_connect(args, st: state.State) -> int:
         if not rpc_url or not pk:
             print(_MISSING_CFG, file=sys.stderr)
             return 2
-        ch = chain.ChainCfg(rpc=rpc_url, contract=pending["contract"], private_key=pk)
+        ch = chain.ChainCfg(rpc=rpc_url, contract=pending["contract"], private_key=pk, relayer=chain.relayer_url(cfg))
         chain.refuse_unsupported(ch.chainid())
 
     spool = Path(args.spool or cfg.get("spool") or (st.root / "spool"))
@@ -551,7 +557,7 @@ def cmd_topup(args, st: state.State) -> int:
     if not pk:
         print(_MISSING_CFG, file=sys.stderr)
         return 2
-    ch = chain.ChainCfg(rpc=rpc_url, contract=contract, private_key=pk)
+    ch = chain.ChainCfg(rpc=rpc_url, contract=contract, private_key=pk, relayer=chain.relayer_url(cfg))
     cid = ch.chainid()
     usdc = ch.usdc()
     amount = int(round(args.amount * chain.USDC))
@@ -565,7 +571,8 @@ def cmd_topup(args, st: state.State) -> int:
     relayer = args.relayer or cfg.get("relayer") or os.environ.get("SRNET_RELAYER")
     if not relayer:
         print(json.dumps(req, indent=2))
-        print("no relayer configured: hand the JSON above to any relayer (POST /fund)", file=sys.stderr)
+        print("no relayer set: set it once (Wallet tab, \"relayer\" in config.json or --relayer) and run "
+              "srnet topup again; or hand the signed JSON above to any relayer (POST /fund)", file=sys.stderr)
         return 0
     out = gasless.submit(relayer, req)
     print(json.dumps({**out, "available": ch.available()}))
@@ -592,8 +599,35 @@ def cmd_pay(args, st: state.State) -> int:
         print(_MISSING_CFG, file=sys.stderr)
         return 2
     ch = chain.ChainCfg(rpc=rpc_url, contract=args.contract or cfg.get("contract") or chain.DEFAULT_CONTRACT,
-                        private_key=pk)
+                        private_key=pk, relayer=chain.relayer_url(cfg))
     print(json.dumps(payments.pay(ch, p)))
+    return 0
+
+
+def cmd_cashout(args, st: state.State) -> int:
+    """Withdraw unused SRNet balance to your wallet (or --to). Gas-free when a relayer is set."""
+    from . import payments
+    cfg = _cfg(st)
+    try:
+        amount = payments.usdc(args.amount)
+    except payments.PaymentError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    rpc_url = args.rpc or cfg.get("rpc") or os.environ.get("SRNET_RPC") or chain.DEFAULT_RPC
+    pk, _ = keys.resolve(args, cfg, st.root)
+    if not pk:
+        print(_MISSING_CFG, file=sys.stderr)
+        return 2
+    ch = chain.ChainCfg(rpc=rpc_url, contract=args.contract or cfg.get("contract") or chain.DEFAULT_CONTRACT,
+                        private_key=pk, relayer=chain.relayer_url(cfg))
+    to = args.to or ch.address()
+    fee = f" plus a {ch.relay_fee / chain.USDC:.2f} USDC relay fee" if ch.relayer else ""
+    print(f"cash out {amount / chain.USDC:.2f} USDC{fee} from your SRNet balance to {to}")
+    if not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
+        print("cancelled", file=sys.stderr)
+        return 1
+    ch.cash_out(amount, to)
+    print(json.dumps({"ok": True, "amount": amount, "to": to, "available": ch.available()}))
     return 0
 
 
@@ -760,10 +794,10 @@ def main(argv=None) -> int:
     ki.add_argument("--from-env", action="store_true", help="read the key from SRNET_PRIVATE_KEY instead")
     ksub.add_parser("show", help="print the keystore address")
 
-    e = sub.add_parser("exits", help="list sellers from the signed board")
+    e = sub.add_parser("exits", help="exit marketplace (Beta / Untested): list sellers from the signed board")
     e.add_argument("--listings", help="offline: read listings.json / .jsonl instead of the board")
 
-    b = sub.add_parser("buy", help="prepay hour(s) at the listed rate; FINAL, no refund")
+    b = sub.add_parser("buy", help="exits (Beta / Untested): prepay hour(s) from your SRNet balance; FINAL, no refund")
     b.add_argument("seller")
     b.add_argument("--listings", help="offline: listings file instead of the board")
     b.add_argument("--no-deliver", action="store_true", help="only write the claim to the local spool")
@@ -774,7 +808,7 @@ def main(argv=None) -> int:
                    help="whole hours to prepay (default 1; >= 1). FINAL once started: keep it at 1 and let auto-renew extend")
     b.add_argument("--no-auto-renew", action="store_true", help="do not renew hourly after this lease")
     b.add_argument("--fund", action="store_true",
-                   help="deposit enough for this lease plus one renewal, after the deposit fee (up to 3%%); approves USDC if needed")
+                   help="advanced: deposit directly from this key first (needs ETH for gas; srnet topup is gas-free)")
     b.add_argument("--spool", help="directory to drop the claim JSON for the seller watcher")
     b.add_argument("--mock", action="store_true")
 
@@ -810,17 +844,25 @@ def main(argv=None) -> int:
     d.add_argument("--rpc-endpoint")
     d.add_argument("--keep-killswitch", action="store_true")
 
-    t = sub.add_parser("topup", help="fund from a phone wallet: QR of your SRNet wallet, no ETH needed")
+    t = sub.add_parser("topup", help="top up: QR / send USDC from any wallet; gas-free deposit via your relayer")
     t.add_argument("--amount", type=float, required=True, help="USDC to wait for and deposit")
     t.add_argument("--all", action="store_true", help="deposit the whole wallet USDC balance once it arrives")
     t.add_argument("--contract")
-    t.add_argument("--relayer", help="relayer URL (default $SRNET_RELAYER or config; unset by default)")
+    t.add_argument("--relayer", help="relayer URL (default: \"relayer\" in config.json, then $SRNET_RELAYER)")
     t.add_argument("--relay-fee", type=int, default=50_000, help="max relayer fee, USDC base units (default 0.05)")
     t.add_argument("--timeout", type=float, default=1800)
     t.add_argument("--rpc")
     t.add_argument("--private-key")
 
     sub.add_parser("deliver", help="retry sending your last claim to the seller over Session Router")
+
+    co = sub.add_parser("cashout", help="withdraw unused SRNet balance (gas-free with a relayer)")
+    co.add_argument("--amount", required=True, help="USDC, e.g. 5.00")
+    co.add_argument("--to", help="destination address (default: your SRNet wallet)")
+    co.add_argument("--yes", action="store_true", help="skip the confirm prompt")
+    co.add_argument("--contract")
+    co.add_argument("--rpc")
+    co.add_argument("--private-key")
 
     py = sub.add_parser("pay", help="pay a seller from your SRNet balance (asks to confirm)")
     py.add_argument("--vendor-id", required=True)
@@ -870,6 +912,7 @@ def main(argv=None) -> int:
         "buy": cmd_buy,
         "connect": cmd_connect,
         "renew": cmd_renew,
+        "cashout": cmd_cashout,
         "stop": cmd_stop,
         "status": cmd_status,
         "disconnect": cmd_disconnect,
